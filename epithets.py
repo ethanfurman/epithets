@@ -536,8 +536,8 @@ class Pipe:
     def __init__(self):
         one = Queue()
         two = Queue()
-        self.one = self.PipeQueue(one, two)
-        self.two = self.PipeQueue(two, one)
+        self.conn1 = self.PipeQueue(one, two)
+        self.conn2 = self.PipeQueue(two, one)
 
 
 class Queue:
@@ -622,6 +622,19 @@ class Queue:
         self.stable.wait()
         # print('queue finished')
 
+    def _put(self, item):
+        # do the actual work
+        with self.mutex:
+            self._submitted += 1
+            self.stable.clear()
+            self.items.append(item)
+            if self.waiting:
+                w = self.waiting.popleft()
+                if isinstance(w, Future):
+                    w.set_result(self.items.popleft())
+                else:
+                    sched.ready.append(w)
+
     def put(self, item):
         # error('%d: Queue.put(%r)' % (thread_ident(), item))
         if from_coroutine():
@@ -637,19 +650,6 @@ class Queue:
     def put_sync(self, item):
         # error('%d: Queue.put_sync()' % thread_ident())
         self._put(item)
-
-    def _put(self, item):
-        # do the actual work
-        with self.mutex:
-            self._submitted += 1
-            self.stable.clear()
-            self.items.append(item)
-            if self.waiting:
-                w = self.waiting.popleft()
-                if isinstance(w, Future):
-                    w.set_result(self.items.popleft())
-                else:
-                    sched.ready.append(w)
 
     def task_done(self):
         # print('%d: Queue.task_done()' % thread_ident())
@@ -699,13 +699,6 @@ class Scheduler:
         error('calling every %ss: %r' % (every, todo))
         self.ready.append(todo)
 
-    def call_soon(self, func, *args, **kwds):
-        if func is None:
-            raise Exception('func cannot be None')
-        todo = Todo(func, *args, **kwds)
-        error('calling soon: %r' % todo)
-        self.ready.append(todo)
-
     def call_later(self, delay, func, *args, **kwds):
         if func is None:
             raise Exception('func cannot be None')
@@ -714,6 +707,13 @@ class Scheduler:
         todo = Todo(func, *args, **kwds)
         error('calling in %d seconds: %r' % (delay, todo))
         heapq.heappush(self.sleeping, (deadline, self.sequence, todo))
+
+    def call_soon(self, func, *args, **kwds):
+        if func is None:
+            raise Exception('func cannot be None')
+        todo = Todo(func, *args, **kwds)
+        error('calling soon: %r' % todo)
+        self.ready.append(todo)
 
     def new_task(self, coro, *args, label=None, **kwds):
         error('creating new task for', label)
@@ -886,6 +886,9 @@ class Todo:
         self.args = args
         self.kwds = kwds
 
+    def __call__(self):
+        return self.func(*self.args, **self.kwds)
+
     def __repr__(self):
         text = repr(self.func)
         if self.args:
@@ -893,9 +896,6 @@ class Todo:
         if self.kwds:
             text += ', ' + ', '.join('%s=%r' % (k, v) for k, v in self.kwds.items())
         return "Todo(%s)" % text
-
-    def __call__(self):
-        return self.func(*self.args, **self.kwds)
 
 ## Widgets
 
@@ -2118,6 +2118,10 @@ class CheckBoxes(Frame):
         else:
             self._selection.append(choice)
 
+    def blur(self):
+        self.current = None
+        super().blur()
+
     def build(self, y, x, height, width):
         if self.inner_size == (1, 1):
             h, w = height, width
@@ -2138,10 +2142,6 @@ class CheckBoxes(Frame):
         self.inner_size = s
         self.layout = l
         super().build(y, x, height, width)
-
-    def blur(self):
-        self.current = None
-        super().blur()
 
     def focus(self):
         if self.current is None:
