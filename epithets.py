@@ -20,6 +20,9 @@ import time
 
 ## globals
 
+dom_query_cache = {}
+main_frame = None
+
 IntEnum._convert_(
         'Attribute',
         __name__,
@@ -245,10 +248,30 @@ class MouseEvent(Event):
     z = 'z coordinate'
     state = 'mouse state'
 
+class on_key:
+    quick_keys = {}
+    def __init__(self, *keystrokes):
+        self.keys = keystrokes
+    def __call__(self, func):
+        for key in self.keys:
+            self.quick_keys[key] = func
+        return func
+
 
 class Size(NamedTuple):
     height = 0
     width = 1
+
+
+def set_names(cls):
+    """
+    Run prop.__set_name__ on class properties in Python 3.5.
+    """
+    if sys.version_info < (3, 6):
+        for name, obj in cls.__dict__.items():
+            if getattr(obj, '__set_name__', None):
+                obj.__set_name__(cls, name)
+    return cls
 
 # Exceptions
 class EpithetException(Exception):
@@ -299,6 +322,12 @@ class Awaitable:
         return result
 
 
+async def _coro():  pass
+_c = _coro()
+Coroutine = type(_c)
+_c.close()
+del _c, _coro
+
 class CSSProperty:
     """
     handle selection and validation of CSS settings
@@ -312,30 +341,76 @@ class CSSProperty:
             if multi:
                 if default is None:
                     default = m_default or choices[0:1]
-                prop.__set__ = prop._multi_choice
+                prop._set = prop._multi_choice
             else:
                 if default is None:
                     default = choices[0]
-                prop.__set__ = prop._single_choice
+                prop._set = prop._single_choice
         elif multi:
-            prop.__set__ = prop._multi_value
+            prop._set = prop._multi_value
+
+    def __get__(prop, obj, cls=None):
+        return getattr(obj, prop.private_name)
+
+    def __set__(prop, obj, *values):
+        self._set(obj, *values)
 
     def __set_name__(prop, cls, name):
-        prop.name = name
+        prop.public_name = name
+        prop.private_name = '_' + name
 
-    def _multi_choice(prop, *values):
+    def _multi_choice(prop, obj, *values):
         for v in values:
             if v not in prop.choices:
                 raise ValueError('%r not in %r' % (value, prop.choices))
-        prop.value = values
+        setattr(obj, prop.private_name, values)
 
-    def _multi_value(prop, *values):
-        prop.value = values
+    def _multi_value(prop, obj, *values):
+        setattr(obj, prop.private_name, values)
 
-    def _single_choice(prop, name, value):
+    def _single_choice(prop, obj, value):
         if value not in prop.choices:
             raise ValueError('%r not in %r' % (value, prop.choices))
-        prop.value = value
+        setattr(obj, prop.private_name, value)
+
+@set_names
+class CSSEntry:
+    """
+    manage css settings for a widget
+    """
+    display = CSSProperty(choices=('block', 'none'))
+    visibility = CSSProperty(choices=('visible', 'hidden'))
+    layout = CSSProperty(choices=('horizontal', 'vertical', 'grid'))
+    color = CSSProperty(choices=('white', 'cyan', 'blue', 'yellow', 'red', 'magenta', 'black', 'green'))
+    background = CSSProperty(choices=('black', 'blue', 'cyan', 'green', 'magenta', 'red', 'white', 'yellow'))
+    text_style = CSSProperty(choices=('normal', 'bold', 'italic', 'strikethrough'), multi=True)
+    padding = CSSProperty(sides=4, default=0)
+    margin = CSSProperty(sides=4, default=0)
+    border = CSSProperty(choices=('none', 'single', 'double'))
+    width = CSSProperty(default='auto')
+    height = CSSProperty(default='auto')
+    min_width = CSSProperty(default=0.0)
+    min_height = CSSProperty(default=0.0)
+    max_width = CSSProperty(default=1.0)
+    max_height = CSSProperty(default=1.0)
+    scroll_bar_color = CSSProperty(choices=('white', 'cyan', 'blue', 'yellow', 'red', 'magenta', 'black', 'green'))
+    scroll_bar_background_color = CSSProperty(choices=('black', 'blue', 'cyan', 'green', 'magenta', 'red', 'white', 'yellow'))
+    scroll_bar_corner_color = CSSProperty(choices=('white', 'cyan', 'blue', 'yellow', 'red', 'magenta', 'black', 'green'))
+    content_align = CSSProperty(choices=(('top', 'middle', 'bottom'), ('left', 'center', 'right')))
+    text_align = CSSProperty(choices=(('top', 'middle', 'bottom'), ('left', 'center', 'right')))
+    grid_size = CSSProperty(sides=2, default=1)
+    grid_rows = CSSProperty(multi=True)
+    grid_columns = CSSProperty(multi=True)
+
+    def __getitem__(self, name):
+        try:
+            return getattr(self, name.replace('-','_'))
+        except AttributeError:
+            raise CSSError('no such setting: %r' % (name, ))
+
+    def __setitem__(self, name, value):
+        setting = self[name]
+        setting
 
 
 class CSSError(Exception):
@@ -347,37 +422,6 @@ class CSS:
     """
     handle css for the UI
     """
-    class CSSEntry:
-        display = CSSProperty(choices=('block', 'none'))
-        visibility = CSSProperty(choices=('visible', 'hidden'))
-        layout = CSSProperty(choices=('horizontal', 'vertical', 'grid'))
-        color = CSSProperty(choices=('white', 'cyan', 'blue', 'yellow', 'red', 'magenta', 'black', 'green'))
-        background = CSSProperty(choices=('black', 'blue', 'cyan', 'green', 'magenta', 'red', 'white', 'yellow'))
-        text_style = CSSProperty(choices=('normal', 'bold', 'italic', 'strikethrough'), multi=True)
-        padding = CSSProperty(sides=4, default=0)
-        margin = CSSProperty(sides=4, default=0)
-        border = CSSProperty(choices=('none', 'single', 'double'))
-        width = CSSProperty(default='auto')
-        height = CSSProperty(default='auto')
-        min_width = CSSProperty(default=0.0)
-        min_height = CSSProperty(default=0.0)
-        max_width = CSSProperty(default=1.0)
-        max_height = CSSProperty(default=1.0)
-        scroll_bar_color = CSSProperty(choices=('white', 'cyan', 'blue', 'yellow', 'red', 'magenta', 'black', 'green'))
-        scroll_bar_background_color = CSSProperty(choices=('black', 'blue', 'cyan', 'green', 'magenta', 'red', 'white', 'yellow'))
-        scroll_bar_corner_color = CSSProperty(choices=('white', 'cyan', 'blue', 'yellow', 'red', 'magenta', 'black', 'green'))
-        content_align = CSSProperty(choices=(('top', 'middle', 'bottom'), ('left', 'center', 'right')))
-        text_align = CSSProperty(choices=(('top', 'middle', 'bottom'), ('left', 'center', 'right')))
-        grid_size = CSSProperty(sides=2, default=1)
-        grid_rows = CSSProperty(multi=True)
-        grid_columns = CSSProperty(multi=True)
-        #
-        def __getitem__(self, name):
-            try:
-                return getattr(self, name.replace('-','_'))
-            except AttributeError:
-                raise CSSError('no such setting: %r' % (name, ))
-
     def __init__(self, css_text=None):
         self.selectors = {}
         self.classes = {}
@@ -423,6 +467,7 @@ class CSS:
             offset += i or 1
             if offset + 1 >= len(self.css_text):
                 break
+        error(tokens)
         #
         class SM:
             def __init__(sm_self):
@@ -433,6 +478,8 @@ class CSS:
                 while sm_self.offset < len(tokens):
                     sm_self.work()
                 if sm_self._tags:
+                    error('tags', sm_self._tags)
+                    error('values', sm_self._values)
                     raise ValueError('incomplete definition for %r' % ' '.join(sm_self._tags))
             def get_tags(sm_self):
                 candidate = tokens[sm_self.offset]
@@ -460,7 +507,10 @@ class CSS:
                             raise ValueError('unknown type for %r' % t)
 
                         entry = dest.setdefault(t, CSSEntry())
+                        error('t:', t)
+                        error('entry:', entry)
                         for setting, value in sm_self._values.items():
+                            error('%r = %r' % (setting, value))
                             entry[setting] = value
 
                     sm_self.work = sm_self.get_tags
@@ -676,6 +726,7 @@ class Scheduler:
     def __init__(self):
         self.ready = deque()                    # tasks, callbacks ready to run
         self.sleeping = []                      # await sched.sleep(int)
+        self.once = []                          # call_once(int, func)  -- duplicates are ignored
         self.every = {}                         # call_every(int, func)  -- calls func every int seconds
         self.waiting = {}                       # await sched.wait_notify(c_id)
         self.sequence = 0
@@ -687,11 +738,15 @@ class Scheduler:
         self.state = 'stopped'
 
     def call_cleanup(self, func, *args, **kwds):
+        error('sched.call_cleanup', func, args, kwds)
         if func is None:
             raise Exception('func cannot be None')
-        self._cleanup.append(Todo(func, *args, **kwds))
+        todo = Todo(func, *args, **kwds)
+        error('calling at cleanup: %r' % todo)
+        self._cleanup.append(todo)
 
     def call_every(self, every, func, *args, **kwds):
+        error('sched.call_every', func)
         if func is None:
             raise Exception('func cannot be None')
         todo = Todo(func, *args, **kwds)
@@ -700,6 +755,7 @@ class Scheduler:
         self.ready.append(todo)
 
     def call_later(self, delay, func, *args, **kwds):
+        error('sched.call_later', delay, func)
         if func is None:
             raise Exception('func cannot be None')
         self.sequence += 1
@@ -709,29 +765,51 @@ class Scheduler:
         heapq.heappush(self.sleeping, (deadline, self.sequence, todo))
 
     def call_soon(self, func, *args, **kwds):
+        error('sched.call_soon', func)
         if func is None:
             raise Exception('func cannot be None')
         todo = Todo(func, *args, **kwds)
         error('calling soon: %r' % todo)
         self.ready.append(todo)
 
+    def call_once(self, within, func, *args, **kwds):
+        error('sched.call_once', within, func)
+        if func is None:
+            raise Exception('func cannot be None')
+        for todo in self.once:
+            if func == todo.func:
+                return
+        self.sequence += 1
+        deadline = time.time() + within
+        todo = Todo(func, *args, **kwds)
+        error('calling within %d seconds: %r' % (within, todo))
+        heapq.heappush(self.once, (deadline, self.sequence, todo))
+
     def new_task(self, coro, *args, label=None, **kwds):
-        error('creating new task for', label)
-        self.ready.append(Task(coro(*args, **kwds), label=label))
+        error('sched.new_task', label or coro)
+        if isinstance(coro, Coroutine):
+            if args or kwds:
+                raise ValueError('cannot provide arguments when coro is already instanciated [%r, %r, %r]'
+                                    % (coro, args, kwds))
+            self.ready.append(Task(coro, label=label))
+        else:
+            self.ready.append(Task(coro(*args, **kwds), label=label))
 
     def new_thread(self, func, *args, label=None, daemon=False, **kwds):
+        error('sched.new_thread', func, label)
         t = Thread(target=func, name=label, daemon=daemon, args=args, kwargs=kwds)
         self._threads.append(t)
         if self.state == 'running':
             t.start()
 
     def notify(self, c_id, msg):
+        error('sched.notify', c_id, msg)
         task = self.waiting[c_id]
         task.input = msg
         self.ready.append(task)
 
     async def readable(self, fileno):
-        # error('awaiting readability on %d' % fileno)
+        error('sched.readable', fileno)
         self._read_waiting[fileno] = sched.current
         sched.current = None
         await switch()
@@ -743,11 +821,13 @@ class Scheduler:
             t.start()
         while (
                 self.state == 'running' and
-                (self.ready or self.sleeping or self._read_waiting or self._write_waiting)
+                (self.ready or self.sleeping or self._read_waiting or self._write_waiting or self.once)
             ):
             if not self.ready:
                 if self.sleeping:
-                    deadline, *_ = self.sleeping[0]
+                    deadline1, *_ = self.sleeping[0]
+                    deadline2, *_ = self.once[0]
+                    deadline = min(deadline1, deadline2)
                     timeout = deadline - time.time()
                     if timeout < 0:
                         timeout = 0
@@ -768,10 +848,20 @@ class Scheduler:
                         break
                     else:
                         self.ready.append(func)
+                if not self.ready:
+                    # low-priority tasks
+                    if self.once:
+                        deadline, seq, func = heapq.heappop(self.once)
+                        if now < deadline:
+                            heapq.heappush(self.once, (deadline, seq, func))
+                        else:
+                            self.ready.append(func)
             while self.ready:
                 func = self.ready.popleft()
                 self.current = func
                 error('running', func)
+                if not isinstance(func, (Task, Todo)):
+                    raise TypeError('invalid type for func: %r' % type(func))
                 func()
                 self.current = None
                 if func in self.every:
@@ -784,6 +874,7 @@ class Scheduler:
         # print('scheduler finished')
 
     async def sleep(self, delay):
+        error('sched.sleep', delay)
         deadline = time.time() + delay
         self.sequence += 1
         heapq.heappush(self.sleeping, (deadline, self.sequence, self.current))
@@ -791,7 +882,7 @@ class Scheduler:
         await switch()
 
     async def wait_notify(self, c_id):
-        # error('scheduling %r for notification' % c_id)
+        error('sched.wait_notify', c_id)
         self.waiting[c_id] = self.current
         self.current = None
         # error('calling switch()')
@@ -800,13 +891,15 @@ class Scheduler:
         return result
 
     def wait_read(self, fileno, func):
-        # error('scheduling %s for %d readability' % (func, fileno))
+        error('sched.wait_read', fileno, func)
         self._read_waiting[fileno] = func
     
     def wait_write(self, fileno, func):
+        error('sched.wait_write', fileno, func)
         self._write_waiting[file_no] = func
 
     async def writeable(self, fileno):
+        error('sched.writable', fileno)
         self._write_waiting[file_no] = sched.current
         sched.current = None
         await switch()
@@ -839,12 +932,24 @@ class Signal:
     def connect(self, subscriber):
         self.receivers.append(subscriber)
 
-    def send(self, event, sender=None):
+    def notify(self, event=None, sender=None):
         results = []
         for receiver in self.receivers:
-            res = receiver(event)
-            results.append((receiver, res))
-        return results
+            error('calling', receiver)
+            if event is not None:
+                res = receiver(event)
+            else:
+                res = receiver()
+            error('notify received %r' % res)
+            if isinstance(res, Coroutine):
+                error('scheduling returned coro')
+                sched.new_task(res)
+
+    def disconnect(self, subscriber):
+        try:
+            self.receivers.remove(subscriber)
+        except ValueError:
+            raise ValueError('%r not subscribed to %r' % (subscriber, self)) from None
 
 
 class Task:
@@ -913,40 +1018,63 @@ class Widget:
     base type for other widgets
     """
     #
-    title = None
     css_id = None
-    css_class = None
+    css_class = ()
     css_elements = None
-    sticky = None
     border_style = None
+    _built = False
+    _focusable = False
     _parent = None
     position = None
     orient = None
     size = None
     sticky = None
+    title = None
+    _value = None
     visible = True
     #
     def __init__(
             self,
-            title=None, border=None,
-            css_id=None, css_class=None, css_elements=None,
+            id=None, css=None, title=None, border=None,
             orient=None, parent=None, position=None,
             size=None, sticky=None, visible=None,
             **kwds
         ):
-        super().__init__()
+        """
+        If size is 0, 0 it will be calculated later.
+        """
+        error(self.__class__.__name__, 'Widget.__init__')
         if title is not None:
             self.title = title
         if border is not None:
             self.border_style = border
-        if css_id is not None:
-            self.css_id = css_id
-        if css_class is not None:
-            self.css_class = css_class
-        if css_elements is not None:
-            self.css_elements = css_elements
+        if id is not None:
+            if not id or id == '#':
+                raise ValueError('id cannot be blank')
+            if id[0] != '#':
+                id = '#' + id
+            if css is not None:
+                css = id + ' ' + css
+            else:
+                css = id
+        if css:
+            self.css_class = []
+            for piece in css.split():
+                if piece.startswith('#'):
+                    if self.css_id is not None:
+                        raise CSSError('too many ids in %r' % css)
+                    if id in dom_query_cache:
+                        raise ValueError('%r already used by %r' % (id, dom_query_cache[id]))
+                    dom_query_cache[id] = self
+                    self.css_id = piece
+                elif piece.startswith('.'):
+                    self.css_class.append(piece)
+                else:
+                    raise ValueError('%r is neither id nor class' % piece)
         if parent is not None:
             self.parent = parent
+            if self is not main_frame:
+                self.parent.contained.append(self)
         if position is not None:
             self.position = position
         if orient is not None:
@@ -963,7 +1091,7 @@ class Widget:
             self._size = self.size
             self.size = None
         else:
-            self._size = 1, 1
+            self._size = 0, 0
         if visible is not None:
             self.visible = visible
         self.contained = []
@@ -981,18 +1109,20 @@ class Widget:
             self.inner_window = 0, 0
 
     def __repr__(self):
-        parent = self.parent
-        if parent is not None:
-            parent = parent.__class__.__name__
-        vals = ['parent=%r' % parent]
-        for attr in (
-                'title','css_id','css_class','css_elements',
-                # 'orient','outer_size','inner_size',
-                ):
-            val = getattr(self, attr, None)
-            if val is not None:
-                vals.append('%s=%s' % (attr, val))
-        return ("<%s:%s>" % (self.__class__.__qualname__, ', '.join(vals)))
+        crumbs = []
+        widget = self
+        while isinstance(widget, Widget):
+            crumbs.append(widget.__class__.__name__)
+            widget = widget.parent
+        value = self.value
+        id = self.css_id
+        if not value and not id:
+            return "<%s>" % '.'.join(reversed(crumbs))
+        else:
+            value = id and str(id) or repr(value) 
+            if len(value) > 32:
+                value = value[:28] + "...'"
+            return "<%s:%s>" % ('.'.join(reversed(crumbs)), value)
 
     @property
     def outer_size(self):
@@ -1026,37 +1156,13 @@ class Widget:
             raise ValueError('cannot set parent to None')
         self._parent = value
 
-    def blur(self):
-        return
+    @property
+    def value(self):
+        return self._value
 
-    def build(self, *args, **kwds):
-        return
-
-    def paint(self):
-        pass
-
-    def process_key(self, event):
-        """
-        process keyboard and mouse input
-
-        return False if not handled
-        """
-        return False
-
-
-class Frame(Widget):
-    """
-    holder of other widgets
-    """
-    _focused = False
-    def __init__(self, modal=False, **kwds):
-        """
-        If size is 0, 0 it will be calculated later.
-        """
-        super().__init__(**kwds)
-        self.modal = modal
-        self.clear_primary = 0, 0
-        self.clear_alternate = 0, 0
+    @value.setter
+    def value(self, value):
+        self._value = value
 
     def add_char(self, *args):
         """
@@ -1112,18 +1218,9 @@ class Frame(Widget):
         By default, the character position and attributes are the
         current settings for the window object.
         """
+        error(self.__class__.__name__, 'Widget.add_string')
         self.window.addstr(*args)
         self.window.noutrefresh()
-
-    def add_widget(self, widget):
-        """
-        Include widget in size calculation.
-        """
-        if isinstance(widget, type):
-            widget = widget()
-        widget.parent = self
-        self.contained.append(widget)
-        return widget
 
     def attr_off(self, attr):
         """
@@ -1164,11 +1261,7 @@ class Frame(Widget):
         self.window.noutrefresh()
 
     def blur(self):
-        self._focused = False
-        self.border_window.bkgd(' ', curses.color_pair(0))
-        for w in self.contained:
-            w.blur()
-        self.no_update_refresh()
+        pass
 
     def border(self, type=SINGLE, ctrl_window=None):
         """
@@ -1188,6 +1281,7 @@ class Frame(Widget):
         strings.  A 0 value for any parameter will cause the default character to be
         used for that parameter.
         """
+        error(self.__class__.__name__, 'Widget.border')
         if type is SPACE:
             ls = rs = ts = bs = tl = tr = bl = br = 32
         elif type is SINGLE:
@@ -1200,7 +1294,8 @@ class Frame(Widget):
         #     bl = ...
         #     br = ...
         else:
-            raise ValueError('unknown border type: %r' % type)
+            ls = rs = ts = bs = tl = tr = bl = br = ord(type)
+            # raise ValueError('unknown border type: %r' % type)
         if ctrl_window is None:
             ctrl_window = self.window
         ctrl_window.border(ls, rs, ts, bs, tl, tr, bl, br)
@@ -1220,9 +1315,15 @@ class Frame(Widget):
         self.border_window.noutrefresh()
 
     def build(self, y, x, height, width, rel=None, ctrl_win=None, _skip_self=False, **kwds):
+        error(self.__class__.__name__, 'Widget.build')
         if not _skip_self:
-            super().build(**kwds)
+            if self.inner_size == (0, 0):
+                self._calc_best_fit(height, width)
+            h, w = self.inner_size
+            if h > height or w > width:
+                h, w = height, width
             by, bx = self.outer_size
+            # trim_size = (by, bx) == (0, 0)
             # error('self.outer_size', self.outer_size)
             # error('y=%r  x=%r' % (y, x))
             # error('%r+%r>%r  or %r+%r>%r' % (by, y, height, bx, x, width))
@@ -1259,42 +1360,18 @@ class Frame(Widget):
                 self.window.clear()
             self.widget = self.window
         # frame built, now build contained widgets
+        self._built = True
         for widget in self.contained:
             if widget.visible:
                 error('building', widget)
                 self.build_contained(widget)
 
-    def build_contained(self, widget):
-        # error('clear primary:', self.clear_primary)
-        # error('    alternate: ', self.clear_alternate)
-        y, x = self.clear_primary
-        dy, dx = self.clear_alternate
-        lines, cols = self.inner_size
-        # error('  with', y, x, lines, cols)
-        try:
-            widget.build(y, x, lines, cols)
-        except InsufficientSpace:
-            if self.orient is HORIZONTAL:
-                x = dx = 0
-                y = dy
-            else: # VERTICAL
-                y = dy = 0
-                x = dx
-            widget.build(y, x, lines, cols)
-        # widget successfully drawn on screen
-        error('Frame.build_contained: setting visible = True')
-        widget.visible = True
-        error('widget', widget.title, 'is', widget.visible)
-        widget.saved_origin = y, x
-        widget_y, widget_x = widget.outer_size
-        if self.orient is HORIZONTAL:
-            x += widget_x
-            dy = max(dy, y+widget_y)
-        else:  # VERTICAL
-            y += widget_y
-            dx = max(dx, x+widget_x)
-        self.clear_primary = y, x
-        self.clear_alternate = dy, dx
+    def _calc_best_fit(self, height, width):
+        for layout, size in zip(self.layouts, self.sizes):
+            if size.height <= height and size.width <= width:
+                break
+        self.inner_size = size
+        self.layout = layout
 
     def change_attr(self, *args, ctrl_window=None):
         """
@@ -1319,6 +1396,7 @@ class Frame(Widget):
         Like erase(), but also cause the whole window to be repainted upon next call
         to refresh().
         """
+        error(self.__class__.__name__, 'Widget.clear')
         self.window.clear()
 
     def clear_ok(self, flag):
@@ -1366,31 +1444,23 @@ class Frame(Widget):
         self.deleteln()
         self.window.noutrefresh()
 
-    def derive_window(self, *args, **kwds):
-        """
-        derive_window([ncols=0, nlines=0,] begin_x, begin_y)
-
-        Create a sub-window (window-relative coordinates).
-
-          nlines    Height.
-          ncols     Width.
-          begin_x   Left side x-coordinate.
-          begin_y   Top side y-coordinate.
-
-        der_win() is the same as calling sub_win(), except that begin_x and begin_y
-        are relative to the origin of the window, rather than relative to the entire
-        screen.
-        """
-        return Frame(parent=self, rel='window', *args, **kwds)
-
-    def dismiss(self):
-        error('Frame.dismiss: setting visible = False')
+    def dismiss(self, cascade=True):
+        error(self.__class__.__name__, 'Widget.dismiss')
+        if sched.focus is self:
+            sched.focus = None
+        for w in self.contained:
+            w.dismiss(cascade=False)
         self.visible = False
         self.window = None
         self.border_window = None
-        if self in self.parent.contained:
-            self.parent.contained.remove(self)
-        self.parent.window.noutrefresh()
+        if cascade:
+            error('%r.contained =' % self.parent.__class__.__name__, self.parent.contained)
+            if self in self.parent.contained:
+                error('removing %r from %r' % (self, self.parent.contained))
+                self.parent.contained.remove(self)
+            error(self.parent, 'is refreshing')
+            self.parent.paint()
+            self.parent.refresh()
 
     def echo_char(self, ch, attr=0):
         """
@@ -1402,14 +1472,24 @@ class Frame(Widget):
         self.window.echochar(ch, attr)
         self.window.noutrefresh()
 
-    def enclose(self, y, x):
+    def encloses(self, *args):
         """
+        encloses([event] [y, x])
+
         Return True if the screen-relative coordinates are enclosed by the window.
 
+          event MouseEvent
           y     line number.
           x     column number.
         """
-        return bool(self.window.enclose(y, x))
+        error(self.__class__.__name__, 'Widget.encloses')
+        error(self, args)
+        if len(args) == 1:
+            event = args[0]
+            y, x = event.y, event.x
+        else:
+            y, x = args
+        return bool(self.border_window.enclose(y, x))
 
     def erase(self):
         """
@@ -1419,22 +1499,13 @@ class Frame(Widget):
         self.window.noutrefresh()
 
     def focus(self):
-        # make sure currently focused widget is not modal
-        if sched.focus.modal:
-            if not self.is_ancestor(sched.focus):
-                return
-        else:
-            sched.focus.blur()
-            sched.focus = self
-        self._focused = True
-        self.border_window.bkgd(' ', curses.color_pair(1)|A_BOLD)
-        self.paint()
-        self.refresh()
+        raise TypeError('%r cannot be focused' % self)
 
     def get_beginning_yx(self):
         """
         Return absolute window origin
         """
+        error(self.__class__.__name__, 'Widget.get_beginning_yx')
         return self.window.getbegyx()
 
     def get_bkgd(self):
@@ -1483,12 +1554,14 @@ class Frame(Widget):
         """
         Return width and height of window.
         """
+        error(self.__class__.__name__, 'Widget.get_max_yx')
         return self.window.getmaxyx()
 
     def get_parent_yx(self):
         """
         Return origin of window relative to parent.
         """
+        error(self.__class__.__name__, 'Widget.get_parent_yx')
         return self.border_window.getparyx()
 
     def get_string(self):
@@ -1520,31 +1593,14 @@ class Frame(Widget):
         """
         return self.getyx()
 
-    def has_focus(self):
-        return self._focused
-
     def hide(self):
         """
         Remove from parent.
         """
+        error(self.__class__.__name__, 'Widget.hide')
         self.window = None
         self.border_window = None
         self.parent.window.noutrefresh()
-
-    def hline(self, *args):
-        """
-        hline([y, x,] ch, n, [attr=_curses.A_NORMAL])
-
-        Display a horizontal line.
-
-          y     Starting line number.
-          x     Starting column number.
-          ch    Character to draw.
-          n     Line length.
-          attr  Attributes for the characters.
-        """
-        self.window.hline(*args)
-        self.window.noutrefresh()
 
     @staticmethod
     def horizontal(rows, cols, size):
@@ -1682,6 +1738,15 @@ class Frame(Widget):
         self.window.insstr(*args)
         self.window.noutrefresh()
 
+    def is_ancestor(self, widget):
+        error(self.__class__.__name__, 'Widget.is_ancestor')
+        p = self.parent
+        while isinstance(p, Widget):
+            if p is widget:
+                return True
+            p = p.parent
+        return False
+
     def is_line_touched(self, line):
         """
         Return True if the specified line was modified, otherwise return False.
@@ -1734,25 +1799,6 @@ class Frame(Widget):
         self.build(y, x, h, w)
         self.no_update_refresh()
 
-    def next(self, direction=1):
-        """
-        cycle through elements in self.contained
-
-        +1 goes forward, -1 goes backward
-        """
-        contained = self.parent.contained
-        i = contained.index(self)
-        i += direction
-        if i >= len(contained):
-            i = 0
-        elif i < 0:
-            i = len(contained) - 1
-        current = contained[i]
-        self.blur()
-        current.focus()
-        self.parent.paint()
-
-
     def no_delay(self, flag):
         """
         If flag is True, getch() will be non-blocking.
@@ -1777,20 +1823,46 @@ class Frame(Widget):
         window, but does not force an update of the physical screen.  To accomplish
         that, call doupdate().
         """
+        error(self.__class__.__name__, 'Widget.no_update_refresh')
         self.window.noutrefresh()
 
-    def paint(self):
+    def paint(self, cascade=True):
         """
         Paint self and all contained widgets.
         """
+        error(self.__class__.__name__, 'Widget.paint')
+        if not self.visible or not self._built:
+            return False
         self.clear()
         if self.border_style:
             self.border(self.border_style, ctrl_window=self.border_window)
         if self.title:
             self.border_window.addstr(0, 1, '---| %s |---' % self.title)
         self.border_window.noutrefresh()
-        for widget in self.contained:
-            widget.paint()
+        error('%s.contained:' % self.__class__.__name__, self.contained)
+        if cascade:
+            for widget in self.contained:
+                if widget.visible:
+                    widget.paint()
+        self.window.noutrefresh()
+
+    def process_key(self, event):
+        """
+        process keyboard input
+
+        return False if not handled
+        """
+        error(self.__class__.__name__, 'Widget.process_key')
+        return False
+
+    def process_mouse(self, clicked_widget, event):
+        """
+        process mouse input
+
+        return False if not handled
+        """
+        error(self.__class__.__name__, 'Widget.process_mouse')
+        return False
 
     def redraw_line(self, beg, num):
         """
@@ -1816,6 +1888,7 @@ class Frame(Widget):
 
         Synchronize actual screen with previous drawing/deleting methods.
         """
+        error(self.__class__.__name__, 'Widget.refresh')
         self.window.refresh()
 
     def resize(self, lines, cols):
@@ -1861,22 +1934,6 @@ class Frame(Widget):
         All scrolling actions will take place in this region.
         """
         self.window.setscrreg(top, bottom)
-
-    def sub_window(self, *args, **kwds):
-        """
-        sub_window([ncols=0, nlines=0,] begin_x, begin_y)
-
-        Create a sub-window (screen-relative coordinates).
-
-          ncols     Width.
-          nlines    Height.
-          begin_x   Left side x-coordinate.
-          begin_y   Top side y-coordinate.
-
-        By default, the sub-window will extend from the specified position to the
-        lower right corner of the containing window.
-        """
-        return Frame(parent=self, rel='screen', *args, **kwds)
 
     def sync_ok(self, flag):
         """
@@ -1932,6 +1989,225 @@ class Frame(Widget):
             for y in range(rows):
                 yield y, x*cell_size
 
+
+class Frame(Widget):
+    """
+    holder of other widgets
+    """
+    modal = False
+
+    def __init__(self, *args, modal=None, **kwds):
+        error(self.__class__.__name__, 'Frame.__init__')
+        super().__init__(*args, **kwds)
+        if modal is not None:
+            self.modal = modal
+        self.clear_primary = 0, 0
+        self.clear_alternate = 0, 0
+
+    def add_widget(self, widget):
+        """
+        Include widget in size calculation.
+        """
+        error(self.__class__.__name__, 'Frame.add_widget')
+        if isinstance(widget, type):
+            widget = widget()
+        if widget.parent is None:
+            widget.parent = self
+            self.contained.append(widget)
+        elif widget.parent is not self:
+            raise ValueError("widget %r added to %r with a parent of %r" % (widget, self, widget.parent))
+        return widget
+
+    def blur(self):
+        error(self.__class__.__name__, 'Frame.blur')
+        if self.modal:
+            error('    nope')
+            return
+        if sched.focus is self:
+            sched.focus = None
+        self.border_window.bkgd(' ', curses.color_pair(0))
+        self.paint()
+        # self.parent.paint() #cascade=False)
+        return self
+
+    def build_contained(self, widget):
+        error(self.__class__.__name__, 'Frame.build_contained')
+        # error('clear primary:', self.clear_primary)
+        # error('    alternate: ', self.clear_alternate)
+        y, x = self.clear_primary
+        dy, dx = self.clear_alternate
+        lines, cols = self.inner_size
+        # error('  with', y, x, lines, cols)
+        try:
+            widget.build(y, x, lines, cols)
+        except InsufficientSpace:
+            if self.orient is HORIZONTAL:
+                x = dx = 0
+                y = dy
+            else: # VERTICAL
+                y = dy = 0
+                x = dx
+            widget.build(y, x, lines, cols)
+        # widget successfully drawn on screen
+        # error('Frame.build_contained: setting visible = True')
+        widget.visible = True
+        # error('widget', widget.title, 'is', widget.visible)
+        widget_y, widget_x = widget.outer_size
+        if self.orient is HORIZONTAL:
+            x += widget_x
+            dy = max(dy, y+widget_y)
+        else:  # VERTICAL
+            y += widget_y
+            dx = max(dx, x+widget_x)
+        self.clear_primary = y, x
+        self.clear_alternate = dy, dx
+
+    def derive_window(self, *args, **kwds):
+        """
+        derive_window([ncols=0, nlines=0,] begin_x, begin_y)
+
+        Create a sub-window (window-relative coordinates).
+
+          nlines    Height.
+          ncols     Width.
+          begin_x   Left side x-coordinate.
+          begin_y   Top side y-coordinate.
+
+        der_win() is the same as calling sub_win(), except that begin_x and begin_y
+        are relative to the origin of the window, rather than relative to the entire
+        screen.
+        """
+        error(self.__class__.__name__, 'Frame.derive_window')
+        return Frame(parent=self, rel='window', *args, **kwds)
+
+    def focus(self):
+        # make sure currently focused widget is not modal
+        error(self.__class__.__name__, 'Frame.focus')
+        error('Frame current focus:', sched.focus)
+        if sched.focus:
+            if sched.focus.modal:
+                if not self.is_ancestor(sched.focus):
+                    return
+            else:
+                sched.focus.blur()
+        sched.focus = self
+        self.border_window.bkgd(' ', curses.color_pair(1)|A_BOLD)
+        self.paint()
+        # self.border_window.noutrefresh()
+        error('new focus:', sched.focus)
+        return self
+
+    def has_focus(self):
+        return sched.focus is self
+
+    def hline(self, *args):
+        """
+        hline([y, x,] ch, n, [attr=_curses.A_NORMAL])
+
+        Display a horizontal line.
+
+          y     Starting line number.
+          x     Starting column number.
+          ch    Character to draw.
+          n     Line length.
+          attr  Attributes for the characters.
+        """
+        self.window.hline(*args)
+        self.window.noutrefresh()
+
+    def next(self):
+        """
+        cycle forward through focusable elements
+        """
+        if self is main_frame or isinstance(self, Frame) and not self._focusable:
+            p = self
+            contained = self.contained
+            i = -1
+        else:
+            p = self.parent
+            contained = p.contained
+            i = contained.index(self)
+        error('before loop:  self=%r,  p=%r,  i=%r,  contained=%r' % (self, p, i, contained))
+        while "searching for next focus":# not current._focusable:
+            i += 1
+            if i >= len(contained):
+                error('  i out of bounds at', i)
+                if p.modal or p is main_frame:
+                    error('    modal or main_frame')
+                    i = 0
+                else:
+                    contained = p.parent.contained
+                    i = contained.index(p)
+                    p = p.parent
+                    error('    changes:  self=%r,  p=%r,  i=%r,  contained=%r' % (self, p, i, contained))
+                    continue
+            current = contained[i]
+            if current.contained:
+                error('  drilling down')
+                contained = current.contained
+                current = contained[0]
+                i = 0
+                p = current
+                error('    changes:  self=%r,  p=%r,  i=%r,  contained=%r' % (self, p, i, contained))
+            if current._focusable:
+                break
+        if current is not self:
+            self.blur()
+            current.focus()
+
+    def prev(self):
+        """
+        cycle backward through focusable elements
+        """
+        if self is main_frame:
+            p = self
+            contained = self.contained
+            i = len(contained)
+        else:
+            p = self.parent
+            contained = p.contained
+            i = contained.index(self)
+        while "searching for previous focusable":
+            i -= 1
+            if i < 0:
+                if p.modal or p is main_frame:
+                    i = len(contained) - 1
+                else:
+                    contained = p.parent.contained
+                    i = contained.index(p)
+                    p = p.parent
+                    continue
+            current = contained[i]
+            if current.contained:
+                error('  drilling down')
+                contained = current.contained
+                current = contained[-1]
+                i = len(contained) - 1
+                p = current
+                error('    changes:  self=%r,  p=%r,  i=%r,  contained=%r' % (self, p, i, contained))
+            if current._focusable:
+                break
+        if current is not self:
+            self.blur()
+            current.focus()
+
+    def sub_window(self, *args, **kwds):
+        """
+        sub_window([ncols=0, nlines=0,] begin_x, begin_y)
+
+        Create a sub-window (screen-relative coordinates).
+
+          ncols     Width.
+          nlines    Height.
+          begin_x   Left side x-coordinate.
+          begin_y   Top side y-coordinate.
+
+        By default, the sub-window will extend from the specified position to the
+        lower right corner of the containing window.
+        """
+        error(self.__class__.__name__, 'Frame.sub_window')
+        return Frame(parent=self, rel='screen', *args, **kwds)
+
     def vline(self, *args):
         """
         vline([y, x,] ch, n, [attr=_curses.A_NORMAL])
@@ -1952,12 +2228,16 @@ class MainFrame(Frame):
     """
     There can be only one.
     """
+    _focusable = True
     stdscr = None
     status_win = None
 
     def __init__(self, status=None, **kwds):
+        error(self.__class__.__name__, 'MainFrame.__init__')
+        global main_frame
         if self.stdscr is not None:
             raise RuntimeError('can only call MainFrame once')
+        main_frame = self
         super().__init__(**kwds)
         self.show_status = status
 
@@ -1980,7 +2260,7 @@ class MainFrame(Frame):
         self.stdscr.keypad(True)
         self.stdscr.nodelay(False)
         curses.curs_set(0)
-        # curses.mousemask(ALL_MOUSE_EVENTS)
+        curses.mousemask(ALL_MOUSE_EVENTS)
         # figure out window sizes
         outer_height, outer_width = self.border_window.getmaxyx()
         inner_height, inner_width = outer_height-self._dfy, outer_width-self._dfx
@@ -2006,13 +2286,15 @@ class MainFrame(Frame):
         curses.endwin()
 
     def build(self):
+        error(self.__class__.__name__, 'MainFrame.build')
         height, width = self.inner_size
         super().build(0, 0, height, width, _skip_self=True)
         if self.status_win is not None:
             self.status_win.build()
 
-    def paint(self):
-        super().paint()
+    def paint(self, cascade=True):
+        error(self.__class__.__name__, 'MainFrame.paint')
+        super().paint(cascade=cascade)
         if self.status_win is not None:
             self.status_win.paint()
         self.refresh()
@@ -2023,52 +2305,92 @@ class Label(Widget):
     line(s) of text to describe another widget
     """
     def __init__(self, text, *args, **kwds):
-        error('Label(%r, *%r, **%r)' % (text, args, kwds))
+        error(self.__class__.__name__, 'Label.__init__')
+        # error('Label(%r, *%r, **%r)' % (text, args, kwds))
         super().__init__(*args, **kwds)
-        self.content = lines = text.split('\n')
+        self._value = lines = text.split('\n')
         width = max([len(l) for l in lines])
         self.inner_size = len(lines), width
 
-    def paint(self):
+    def paint(self, cascade=True):
         """
         paint the Label text in the parent window starting at line, col
         """
+        error(self.__class__.__name__, 'Label.paint')
         p = self.parent
-        for i, line in enumerate(self.content):
+        for i, line in enumerate(self.value):
             p.add_string(i, 0, line)
         p.no_update_refresh()
 
 
-class Entry(Widget):
+class Entry(Frame):
     """
-    enter one line of data
+    enter one line of text
     """
-    type = 'TEXT'
+    _focusable = True
 
 
-class TextBox(Widget):
+class TextBox(Frame):
     """
-    many lines of text
+    enter many lines of text
     """
+    _focusable = True
+    read_only = False
+
+    def paint(self, cascade=True):
+        error(self.__class__.__name__, 'TextBox.paint')
+        super().paint(cascade=cascade)
+        if self.value:
+            self.add_string(0, 0, self.value)
 
 
 class Button(Frame):
     """
     send a button-pressed event
     """
-    def __init__(self, text, *args, **kwds):
-        error('Button(%r, *%r, **%r)' % (text, args, kwds))
+    _focusable = True
+
+    def __init__(self, text, *args, on_click, **kwds):
+        error(self.__class__.__name__, 'Button.__init__')
+        # error('Button(%r, %r, *%r, **%r)' % (text, on_click, args, kwds))
         super().__init__(*args, **kwds)
-        self.text = text
+        self.value = text
+        self.on_click = on_click
         self.inner_size = 1, len(text) + 4
 
-    def paint(self):
-        super().paint()
-        error('painting %r' % self.text)
+    def _activate(self):
+        error('on-click =', self.on_click)
+        self.focus()
+        if isinstance(self.on_click, KeyPress):
+            return KeyEvent(self.on_click)
+        elif isinstance(self.on_click, Signal):
+            error('scheduling', self.on_click.notify)
+            sched.call_soon(self.on_click.notify)
+        else:
+            # better be a Task or Todo!
+            sched.ready.append(self.on_click)
+        return True
+
+    def paint(self, cascade=True):
+        error(self.__class__.__name__, 'Button.paint')
+        super().paint(cascade=cascade)
+        error('painting %r' % self.value)
         error('window size:', self.get_max_yx())
         error('button size:', self.outer_size)
-        self.add_string(0, 0, ' [%s]' % self.text)
+        self.add_string(0, 0, ' [%s]' % self.value)
         self.no_update_refresh()
+
+    def process_key(self, event):
+        error(self.__class__.__name__, 'Button.process_key')
+        # error(self.__class__.__name__, 'is processing', event)
+        if event.key in (KEY_SPACE, KEY_RETURN):
+            return self._activate()
+        return False
+
+    def process_mouse(self, clicked_widget, event):
+        error(self.__class__.__name__, 'Button.process_mouse')
+        return self._activate()
+
 
 class CheckBoxes(Frame):
     """
@@ -2076,11 +2398,13 @@ class CheckBoxes(Frame):
     """
     choices = []
     current = None
-    _selection = []
+    _focusable = True
+    _value = []
     _grid = {}
 
-    def __init__(self, choices=None, **kwds):
-        super().__init__(**kwds)
+    def __init__(self, *args, choices=None, **kwds):
+        error(self.__class__.__name__, 'CheckBoxes.__init__')
+        super().__init__(*args, **kwds)
         if choices is not None:
             self.choices = choices
         # build possible sizes
@@ -2108,22 +2432,24 @@ class CheckBoxes(Frame):
         self.sizes = [(j, k*cell_width) for j, k in self.layouts]
 
     @property
-    def selection(self):
-        return self._selection
+    def value(self):
+        return self._value
 
-    @selection.setter
-    def selection(self, choice):
-        if choice in self._selection:
-            self._selection.remove(choice)
+    @value.setter
+    def value(self, choice):
+        if choice in self._value:
+            self._value.remove(choice)
         else:
-            self._selection.append(choice)
+            self._value.append(choice)
 
     def blur(self):
-        self.current = None
+        error(self.__class__.__name__, 'CheckBoxes.blur')
         super().blur()
+        self.current = None
 
     def build(self, y, x, height, width):
-        if self.inner_size == (1, 1):
+        error(self.__class__.__name__, 'CheckBoxes.build')
+        if self.inner_size == (0, 0):
             h, w = height, width
         else:
             h, w = self.inner_size
@@ -2144,20 +2470,21 @@ class CheckBoxes(Frame):
         super().build(y, x, height, width)
 
     def focus(self):
+        error(self.__class__.__name__, 'CheckBoxes.focus')
         if self.current is None:
             try:
-                possible = self.selection or self.choices
+                possible = self.value or self.choices
                 if isinstance(possible, (list, tuple)):
                     possible = possible[0]
                 self.current = possible
             except IndexError:
                 pass
         error('CB.focus() has self.current as %r' % self.current)
-        super().focus()
+        return super().focus()
 
-    def paint(self):
-        error('CB.paint()')
-        super().paint()
+    def paint(self, cascade=True):
+        error(self.__class__.__name__, 'CheckBoxes.paint')
+        super().paint(cascade=cascade)
         layout = (self.vertical, self.horizontal)[self.orient is HORIZONTAL]
         rows, cols = self.layout
         layout = layout(rows, cols, self.cell_width)
@@ -2165,7 +2492,7 @@ class CheckBoxes(Frame):
         for c in self.choices:
             error('  c = %r' % c)
             current = c == self.current
-            selected = c in self.selection
+            selected = c in self.value
             y, x = next(layout)
             attr = (A_NORMAL, A_UNDERLINE)[selected]
             if current:
@@ -2178,15 +2505,16 @@ class CheckBoxes(Frame):
         self.no_update_refresh()
 
     def process_key(self, event):
-        error(self.__class__.__name__, 'is processing', event)
+        error(self.__class__.__name__, 'CheckBoxes.process_key')
+        # error(self.__class__.__name__, 'is processing', event)
         c = self.current
         w = self.cell_width
         opts = self._grid
         y, x = opts[c]
         if event.key is KEY_SPACE:
-            self.selection = self.current
-            error(self.selection)
-            sched.call_soon(Signal(self.__class__.__name__).send, MessageEvent(selected=self.selection))
+            self.value = self.current
+            error(self.value)
+            sched.call_soon(Signal(self.__class__.__name__).notify, MessageEvent(selected=self.value))
         elif event.key is KEY_RIGHT:
             if (y, x+w) in opts:
                 c = opts[y, x+w]
@@ -2226,45 +2554,94 @@ class RadioButtons(CheckBoxes):
     select one of several options
     """
     @property
-    def selection(self):
-        error('in RadioButtons selection getter')
-        error('self._selection is', self._selection)
-        return self._selection and self._selection[0] or ()
+    def value(self):
+        return self._value and self._value[0] or ()
 
-    @selection.setter
-    def selection(self, choice):
-        error('in RadioButtons selection setter')
-        if choice not in self._selection:
-            self._selection[:] = [choice]
+    @value.setter
+    def value(self, choice):
+        if choice not in self._value:
+            self._value[:] = [choice]
 
 class CheckBoxEntry(Widget):
     """
     select an option and/or provide a value
     """
+    _focusable = True
 
 
 class Selection(Widget):
     """
     select one of several options from dropdown
     """
+    _focusable = True
 
 
-class Table(Widget):
+class Table(Frame):
     """
     display table data
     """
+
+class ProgramStatus(Frame):
+    """
+    Display status message to user.
+    """
+    border_style = SINGLE
+    _focusable = True
+    modal = True
+
+    def __init__(self, message, *args, button='Ok', show_button=True, **kwds):
+        error(self.__class__.__name__, 'ProgramStatus.__init__')
+        super().__init__(*args, **kwds)
+        p = kwds.get('parent', main_frame)
+        p.add_widget(self)
+        self.message = m = self.add_widget(Label(message))
+        self.button = b = self.add_widget(Button(button, on_click=Todo(self.dismiss), visible=show_button))
+        self.inner_size = 2, max(m.outer_size.width, b.outer_size.width)
+        w, h = self.parent.inner_size
+        self.build(0, 0, w, h)
+        self.prev_focus = sched.focus.blur()
+        error('saved %r as prev_focus' % self.prev_focus)
+        self.focus()
+        self.paint()
+        self.refresh()
+
+    def build(self, y, x, height, width):
+        error(self.__class__.__name__, 'ProgramStatus.build')
+        l, c = self.outer_size
+        h, w = self.parent.inner_size
+        y = (h-l) // 2
+        x = (w-c) // 2
+        # error('final size:', self.inner_size)
+        super().build(y, x, height, width)
+
+    def dismiss(self):
+        error('ProgramStatus.dismiss')
+        super().dismiss()
+        sched.focus = self.prev_focus.focus()
+        error('focus returned to', sched.focus)
+
+    def show_button(self):
+        error(self.__class__.__name__, 'ProgramStatus.show_button')
+        self.button.visible = True
+        self.build_contained(self.button)
+        self.button.focus()
+        self.button.refresh()
 
 
 class QueryUser(Frame):
     """
     Ask user a question; return response.
     """
-    def __init__(self, question, yes='Yes', no='Cancel', *args, **kwds):
-        error('QueryUser(%r, %r, %r, *%r, **%r)' % (question, yes, no, args, kwds))
+    # _focusable = True
+    modal = True
+
+    def __init__(self, question, *args, yes='Yes', no='No', **kwds):
+        error(self.__class__.__name__, 'QueryUser.__init__')
+        # error('QueryUser(%r, %r, %r, *%r, **%r)' % (question, yes, no, args, kwds))
         super().__init__(*args, **kwds)
-        self.question = q = Label(question, parent=self)
-        self.yes = y = Button(yes, parent=self)
-        self.no = n = Button(no, parent=self)
+        self.question = q = Label(question)
+        self.yes = y = Button(yes, on_click=KEY_Y)
+        self.no = n = Button(no, on_click=KEY_ESC)
         self.sizes = []
         # first configuration: all on one "line"
         height = max(w.outer_size.height for w in (q, y, n))
@@ -2274,58 +2651,59 @@ class QueryUser(Frame):
         height = q.outer_size.height + max(y.outer_size.height, n.outer_size.height)
         width = max(q.outer_size.width, y.outer_size.width+n.outer_size.width)
         self.sizes.append(Size(height, width))
+        self.layouts = [HORIZONTAL, VERTICAL]
         self.add_widget(q)
         self.add_widget(y)
         self.add_widget(n)
         error('  QueryUser init()ed')
 
     def __call__(self):
-        error('current focus', sched.focus)
-        self.last_focused = sched.focus
+        error('QueryUser current focus', sched.focus)
+        self.prev_focus = sched.focus.blur()
+        error('saved %r as prev_focus' % self.prev_focus)
         lines, cols = self.parent.inner_size
         self.build(0, 0, lines, cols)
-        self.paint()
         self.focus()
-        self.no_update_refresh()
+        self.paint()
+        self.refresh()
 
     def build(self, y, x, height, width):
-        error('building QueryUser with', y, x, height, width)
-        if self.inner_size == (1, 1):
-            h, w = height, width
+        error(self.__class__.__name__, 'QueryUser.build')
+        if self.inner_size == (0, 0):
+            self._calc_best_fit(height, width)
+        if self.layout == HORIZONTAL:
+            self.question.sticky = NS
         else:
-            h, w = self.inner_size
-            if h > height or w > width:
-                h, w = height, width
-        target = self.sizes[0]
-        self.layout = HORIZONTAL
-        self.question.sticky = NS
-        error('testing', target)
-        if target.height > h or target.width > w:
             self.question.sticky = EW
-            target = self.sizes[1]
-            error('  updating target to', target)
-            self.layout = VERTICAL
-        self.inner_size = target
         # center widget
-        l, c = self.inner_size
+        l, c = self.outer_size
         h, w = self.parent.inner_size
         y = (h-l) // 2
         x = (w-c) // 2
         error('final size:', self.inner_size)
         super().build(y, x, height, width)
 
-    def paint(self):
-        error('QueryUser.paint()')
-        super().paint()
+    def paint(self, cascade=True):
+        error(self.__class__.__name__, 'QueryUser.paint')
+        super().paint(cascade=cascade)
 
     def process_key(self, event):
-        if event.key in (KEY_Y, KEY_CAP_Y):
+        error(self.__class__.__name__, 'QueryUser.process_key')
+        key = event.key
+        if key in (KEY_SPACE, KEY_RETURN):
+            if self.yes.has_focus():
+                key = KEY_Y
+            elif self.no.has_focus():
+                key = KEY_C
+        if key in (KEY_Y, KEY_CAP_Y):
             sched.state = 'user-quit'
-        elif event.key in (KEY_ESC, KEY_C, KEY_CAP_C):
-            self.blur()
-            sched.focus = self.last_focused
-            sched.focus.focus()
+            return True
+        elif key in (KEY_ESC, KEY_N, KEY_CAP_N):
             self.dismiss()
+            sched.focus = self.prev_focus.focus()
+            error('focus returned to', sched.focus)
+            sched.focus.refresh()
+            return True
         return False
         
 
@@ -2336,6 +2714,7 @@ class StatusLine(Frame):
     last_event = None
 
     def build(self, *args, **kwds):
+        error(self.__class__.__name__, 'StatusLine.build')
         y, x = self.position
         height, width = self.inner_size
         self.window = self.border_window = self.parent.border_window.subwin(height, width, y, x)
@@ -2345,12 +2724,13 @@ class StatusLine(Frame):
         self.last_event = msg
         self.paint()
 
-    def paint(self):
+    def paint(self, cascade=True):
+        error(self.__class__.__name__, 'StatusLine.paint')
         height, width = self.inner_size
         self.hline(0, 0, '_', width)
         self.add_string(1, 0, "rows: %d,  cols:%d" % self.parent.border_window.getmaxyx())
         self.add_string(1, 25, "color pairs: %d" % curses.COLOR_PAIRS)
-        self.add_string(1, 50, "event: %-50r" % self.last_event)
+        self.add_string(1, 50, "event: %-50r" % (self.last_event, ))
         self.no_update_refresh()
 
 
@@ -2367,16 +2747,23 @@ class App:
     border_style = None
     title = None
     status = None
-    focus = None
+    initial_focus = None
     layout = ()
 
     def __init__(self):
+        error(self.__class__.__name__, 'App.__init__')
         self.main = main = MainFrame(border=self.border_style, status=self.status, title=self.title, parent=self)
+        for name in dir(self):
+            if name.startswith('on_'):
+                signal_name = ''.join(n.title() for n in name.split('_')[1:])
+                error('connecting signal %r to %r' % (signal_name, getattr(self, name)))
+                Signal(signal_name).connect(getattr(self, name))
         for widget in self.layout:
             widget = main.add_widget(widget)
             for name in dir(widget):
                 if name.startswith('on_'):
                     signal_name = ''.join(n.title() for n in name.split('_')[1:])
+                    error('connecting signal %r to %r' % (signal_name, getattr(widget, name)))
                     Signal(signal_name).connect(getattr(widget, name))
 
 
@@ -2408,28 +2795,70 @@ class App:
                     path.append(name)
         return path
 
+    def paint(self, cascade=True):
+        error(self.__class__.__name__, 'App.paint')
+        self.main.paint(cascade=cascade)
+
     def process_key(self, event):
-        error(self.__class__.__name__, 'is processing', event)
-        if event.key == KEY_CTRL_Q:
-            sched.call_soon(QueryUser('Exit application?', border=SINGLE, modal=True, parent=self.main))
-        elif event.key == KEY_CTRL_R:
-            sched.call_soon(self.redraw)
+        error(self.__class__.__name__, 'App.process_key')
+        # error(self.__class__.__name__, 'is processing', event)
+        if event.key in on_key.quick_keys:
+            sched.call_soon(on_key.quick_keys[event.key], self)
+        elif event.key == KEY_CTRL_Q:
+            sched.call_soon(QueryUser('Exit application?', border=SINGLE, parent=self.main))
         elif event.key == KEY_CTRL_C:
             sched.state = 'user-quit'
         elif event.key == KEY_TAB:
             # focus next field/button/whatever
-            sched.focus.next(+1)
+            error('MyApp: moving focus forward')
+            sched.focus.next()
         elif event.key == KEY_BTAB:
-            sched.focus.next(-1)
+            # or previous field/button/whatever
+            error('MyApp: moving focus backward')
+            sched.focus.prev()
+        return True
+
+    def process_mouse(self, clicked_widget, event):
+        # widget = smallest widget that contains mouse event
+        error(self.__class__.__name__, 'App.process_mouse')
+        # error('mouse click in', clicked_widget)
+        # error('focused: %r   event: %r' % (sched.focus, event))
+        if not sched.focus.encloses(event):
+            # switch focus
+            clicked_widget.focus()
         return True
 
     async def process_user_input(self, main):
+        #
+        def find_clicked_widget(widget, fail=False):
+            # find smallest widget that contains mouse event
+            w = widget
+            error('initial widgit:', w)
+            contained = w.contained[:]
+            error('initial contained:', contained)
+            while contained:
+                w = contained.pop(0)
+                error('checking', w, event)
+                if w.encloses(event):
+                    contained = getattr(w, 'contained', [])
+                    error('narrowing search to:', contained)
+                    if not contained:
+                        return w
+            else:
+                # not found anywhere in currently focused widget
+                # if not modal, search rest of screen for match
+                if fail or widget is self.main:
+                    return self.main
+                if sched.focus.modal:
+                    return False
+                return find_clicked_widget(self.main, fail=True)
+        #
         while "user hasn't quit":
             ch = main.stdscr.getch()
             if ch == -1:
                 event = None
             elif ch == KEY_MOUSE:
-                event = MouseEvent(curses.getmouse())
+                event = MouseEvent(*curses.getmouse())
             elif ch in KeyPress:
                 event = KeyEvent(KeyPress(ch))
             else:
@@ -2437,33 +2866,61 @@ class App:
             if event is not None:
                 name = event.__class__.__name__
                 if self.status:
-                    sched.call_soon(Signal('Event').send, event, )
+                    sched.call_soon(Signal('Event').notify, event, )
                 w = sched.focus
-                while w:
-                    if w.process_key(event):
-                        break
-                    else:
+                if isinstance(event, MouseEvent):
+                    w = clicked_widget = find_clicked_widget(sched.focus)
+                    while w:
+                        error('calling %s.process_mouse()' % w)
+                        res = w.process_mouse(clicked_widget, event)
+                        if res is None:
+                            raise ValueError('%s.process_mouse() returned None' % w)
+                        elif isinstance(res, Event):
+                            event = res
+                            break
+                        elif res:
+                            break
+                        w = w.parent
+                if isinstance(event, KeyEvent):
+                    while w:
+                        error('calling %s.process_key()' % w)
+                        res = w.process_key(event)
+                        if res is None:
+                            raise ValueError('%s.process_key() returned None' % w)
+                        elif isinstance(res, Event):
+                            event = res
+                        elif res:
+                            break
                         w = w.parent
                 if name in Signal.registry:
                     signal = Signal(name)
-                    sched.call_soon(signal.send, event, )
+                    sched.call_soon(signal.notify, event, )
                 sched.call_soon(main.refresh)
             await sched.readable(sys.stdin.fileno())
 
-    def query_one(self, cls=None, id=None):
+    def query_one(self, id=None, cls=None):
+        """
+        Search DOM for object with id or cls.
+        """
         if cls is None and id is None:
             raise ValueError('either class or css id must be given')
         if cls is not None and id is not None:
             raise ValueError('cannot specify both class and css id')
-        for widget in self.main.contained:
-            if (
-                cls is not None and isinstance(widget, cls)
-                or isinstance(cls, str) and widget.__class__.__name__ == cls
-                or id is not None and widget.css_id == id
-            ):
-                return widget
-        raise ValueError('unable to find %r' % (cls or id))
+        target = id or cls
+        if target not in dom_query_cache:
+            for widget in self.main.contained:
+                if (
+                    cls is not None and isinstance(widget, cls)
+                    or isinstance(cls, str) and widget.__class__.__name__ == cls
+                    or id is not None and widget.css_id == id
+                ):
+                    dom_query_cache[target] = widget
+                    break
+            else:
+                raise ValueError('unable to find %r' % (cls or id))
+        return dom_query_cache[target]
 
+    @on_key(KEY_CTRL_R)
     def redraw(self):
         widgets = self.main.contained[:]
         i = 0
@@ -2475,11 +2932,18 @@ class App:
         # hide them
         for w in reversed(widgets):
             w.hide()
+            if isinstance(w, Frame):
+                w.clear_primary = 0, 0
+                w.clear_alternate = 0, 0
         # and rebuild them
+        self.main.clear_primary = 0, 0
+        self.main.clear_alternate = 0, 0
         self.main.build()
         self.main.paint()
+        sched.focus.focus()
 
     def refresh(self):
+        error(self.__class__.__name__, 'App.refresh')
         self.main.refresh()
 
     def run(self):
@@ -2488,12 +2952,9 @@ class App:
                 main.build()
                 main.paint()
                 # get initially focused widget
-                obj = self.focus
+                obj = self.initial_focus
                 if obj is None:
-                    if main.contained:
-                        obj = main.contained[0]
-                    else:
-                        obj = main
+                    obj = main
                 else:
                     obj = self.query_one(obj)
                 # and save it on the scheduler
@@ -2571,7 +3032,7 @@ if __name__ == '__main__':
     # print(sched.sleeping, flush=True)
     # sched.run()
 
-    class EnumButtonBox(RadioButtons):
+    class EnumButtonBox(CheckBoxes):
         border_style = SINGLE
         choices = ('Attribute', 'Color', 'Misc', 'ButtonPress', 'KeyPress', 'ACS')
         orient= HORIZONTAL
@@ -2582,29 +3043,31 @@ if __name__ == '__main__':
 
     class EnumDisplay(Frame):
         sticky = NSEW
-        enum = ()
         border_style = SINGLE
         title = 'members'
 
         def on_enum_button_box(self, msg):
             # msg should be string of selected Enum
             error(msg.selected)
-            self.enum = globals()[msg.selected]
-            self.title = '%d members' % len(self.enum)
+            self.value = [globals()[enum_name] for enum_name in msg.selected]
+            self.title = '%d enums' % len(self.value)
             self.paint()
 
-        def paint(self):
-            super().paint()
+        def paint(self, cascade=True):
+            super().paint(cascade=cascade)
             iy, ix = self.inner_size
             cols = ix // 40
             rows = iy
             layout = self.vertical(rows, cols, 40)
-            for mbr in self.enum:
-                try:
-                    y, x = next(layout)
-                except StopIteration:
-                    break
-                self.add_string(y, x, '%-25s %r' % (mbr.name, mbr.value))
+            if self.value is not None:
+                for enum in self.value:
+                    error('current enum: %r' % enum)
+                    for mbr in enum:
+                        try:
+                            y, x = next(layout)
+                        except StopIteration:
+                            break
+                        self.add_string(y, x, '%-25s %r' % (mbr.name, mbr.value))
             self.no_update_refresh()
 
 
@@ -2613,7 +3076,7 @@ if __name__ == '__main__':
         border_style = SINGLE
         status = True
         title = 'curses Constants'
-        focus = EnumButtonBox
+        initial_focus = EnumButtonBox
 
         layout = [
                 EnumButtonBox,
