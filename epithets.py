@@ -1024,10 +1024,13 @@ class Widget:
     border_style = None
     _built = False
     _focusable = False
+    layouts = ()
+    modal = False
     _parent = None
     position = None
     orient = None
     size = None
+    sizes = ()
     sticky = None
     title = None
     _value = None
@@ -1261,7 +1264,7 @@ class Widget:
         self.window.noutrefresh()
 
     def blur(self):
-        pass
+        return self
 
     def border(self, type=SINGLE, ctrl_window=None):
         """
@@ -1315,11 +1318,16 @@ class Widget:
         self.border_window.noutrefresh()
 
     def build(self, y, x, height, width, rel=None, ctrl_win=None, _skip_self=False, **kwds):
-        error(self.__class__.__name__, 'Widget.build')
+        error(self.__class__.__name__, 'Widget.build', y, x, height, width)
         if not _skip_self:
+            if x == width or y == height:
+                # fail early
+                error('WILL NOT FIT')
+                raise InsufficientSpace('%r does not fit in %r' % (self, self.parent))
             if self.inner_size == (0, 0):
-                self._calc_best_fit(height, width)
+                self._calc_best_fit(height-y, width-x)
             h, w = self.inner_size
+            error('h, w =', h, w)
             if h > height or w > width:
                 h, w = height, width
             by, bx = self.outer_size
@@ -1367,11 +1375,16 @@ class Widget:
                 self.build_contained(widget)
 
     def _calc_best_fit(self, height, width):
+        error('_calc_best_fit', height, width)
         for layout, size in zip(self.layouts, self.sizes):
             if size.height <= height and size.width <= width:
+                error('  setting inner to', size)
+                self.inner_size = size
+                self.layout = layout
                 break
-        self.inner_size = size
-        self.layout = layout
+        else:
+            error('  setting outer to', height, width)
+            self.outer_size = height, width
 
     def change_attr(self, *args, ctrl_window=None):
         """
@@ -1451,6 +1464,7 @@ class Widget:
         for w in self.contained:
             w.dismiss(cascade=False)
         self.visible = False
+        self._built = False
         self.window = None
         self.border_window = None
         if cascade:
@@ -1598,6 +1612,7 @@ class Widget:
         Remove from parent.
         """
         error(self.__class__.__name__, 'Widget.hide')
+        self._built = False
         self.window = None
         self.border_window = None
         self.parent.window.noutrefresh()
@@ -1739,9 +1754,10 @@ class Widget:
         self.window.noutrefresh()
 
     def is_ancestor(self, widget):
-        error(self.__class__.__name__, 'Widget.is_ancestor')
+        error(self.__class__.__name__, 'Widget.is_ancestor', widget)
         p = self.parent
         while isinstance(p, Widget):
+            error('  checking', p)
             if p is widget:
                 return True
             p = p.parent
@@ -2093,7 +2109,6 @@ class Frame(Widget):
         sched.focus = self
         self.border_window.bkgd(' ', curses.color_pair(1)|A_BOLD)
         self.paint()
-        # self.border_window.noutrefresh()
         error('new focus:', sched.focus)
         return self
 
@@ -2119,7 +2134,8 @@ class Frame(Widget):
         """
         cycle forward through focusable elements
         """
-        if self is main_frame or isinstance(self, Frame) and not self._focusable:
+        # if self is main_frame or isinstance(self, Frame) and not self._focusable:
+        if self is main_frame or self.modal:
             p = self
             contained = self.contained
             i = -1
@@ -2127,28 +2143,22 @@ class Frame(Widget):
             p = self.parent
             contained = p.contained
             i = contained.index(self)
-        error('before loop:  self=%r,  p=%r,  i=%r,  contained=%r' % (self, p, i, contained))
-        while "searching for next focus":# not current._focusable:
+        while "searching for next focus":
             i += 1
             if i >= len(contained):
-                error('  i out of bounds at', i)
                 if p.modal or p is main_frame:
-                    error('    modal or main_frame')
                     i = 0
                 else:
                     contained = p.parent.contained
                     i = contained.index(p)
                     p = p.parent
-                    error('    changes:  self=%r,  p=%r,  i=%r,  contained=%r' % (self, p, i, contained))
                     continue
             current = contained[i]
             if current.contained:
-                error('  drilling down')
                 contained = current.contained
                 current = contained[0]
                 i = 0
                 p = current
-                error('    changes:  self=%r,  p=%r,  i=%r,  contained=%r' % (self, p, i, contained))
             if current._focusable:
                 break
         if current is not self:
@@ -2179,12 +2189,10 @@ class Frame(Widget):
                     continue
             current = contained[i]
             if current.contained:
-                error('  drilling down')
                 contained = current.contained
                 current = contained[-1]
                 i = len(contained) - 1
                 p = current
-                error('    changes:  self=%r,  p=%r,  i=%r,  contained=%r' % (self, p, i, contained))
             if current._focusable:
                 break
         if current is not self:
@@ -2446,6 +2454,7 @@ class CheckBoxes(Frame):
         error(self.__class__.__name__, 'CheckBoxes.blur')
         super().blur()
         self.current = None
+        return self
 
     def build(self, y, x, height, width):
         error(self.__class__.__name__, 'CheckBoxes.build')
@@ -2586,7 +2595,7 @@ class ProgramStatus(Frame):
     Display status message to user.
     """
     border_style = SINGLE
-    _focusable = True
+    _focusable = False
     modal = True
 
     def __init__(self, message, *args, button='Ok', show_button=True, **kwds):
@@ -2597,6 +2606,8 @@ class ProgramStatus(Frame):
         self.message = m = self.add_widget(Label(message))
         self.button = b = self.add_widget(Button(button, on_click=Todo(self.dismiss), visible=show_button))
         self.inner_size = 2, max(m.outer_size.width, b.outer_size.width)
+        error('ProgramStatus.message.parent:', m.parent)
+        error('ProgramStatus.button.parent:', b.parent)
         w, h = self.parent.inner_size
         self.build(0, 0, w, h)
         self.prev_focus = sched.focus.blur()
@@ -2840,7 +2851,7 @@ class App:
                 w = contained.pop(0)
                 error('checking', w, event)
                 if w.encloses(event):
-                    contained = getattr(w, 'contained', [])
+                    contained = getattr(w, 'contained', [])[:]
                     error('narrowing search to:', contained)
                     if not contained:
                         return w
@@ -2907,18 +2918,44 @@ class App:
         if cls is not None and id is not None:
             raise ValueError('cannot specify both class and css id')
         target = id or cls
-        if target not in dom_query_cache:
-            for widget in self.main.contained:
-                if (
-                    cls is not None and isinstance(widget, cls)
-                    or isinstance(cls, str) and widget.__class__.__name__ == cls
-                    or id is not None and widget.css_id == id
+        if target in dom_query_cache:
+            return dom_query_cache[target]
+        #
+        current = self.main
+        p = self.main
+        contained = []
+        i = -1
+
+        while "searching for target":
+
+            if (
+                cls is not None and isinstance(current, cls)
+                or isinstance(cls, str) and current.__class__.__name__ == cls
+                or id is not None and current.css_id == id
                 ):
-                    dom_query_cache[target] = widget
-                    break
+                dom_query_cache[target] = current
+                return current
+
+            if current.contained:
+                contained = current.contained
+                current = contained[0]
+                i = 0
+                p = current
             else:
-                raise ValueError('unable to find %r' % (cls or id))
-        return dom_query_cache[target]
+                i += 1
+                while i >= len(contained):
+                    if isinstance(p, App):
+                        break
+                    contained = p.parent.contained
+                    i = contained.index(p) + 1
+                    p = p.parent
+                else:
+                    # end of the road
+                    break
+                current = contained[i]
+
+        else:
+            raise ValueError('unable to find %r' % (cls or id))
 
     @on_key(KEY_CTRL_R)
     def redraw(self):
@@ -2947,6 +2984,7 @@ class App:
         self.main.refresh()
 
     def run(self):
+        sched.focus = None
         try:
             with self.main as main:
                 main.build()
@@ -2956,9 +2994,9 @@ class App:
                 if obj is None:
                     obj = main
                 else:
-                    obj = self.query_one(obj)
+                    obj = self.query_one(cls=obj)
                 # and save it on the scheduler
-                sched.focus = obj
+                # sched.focus = obj
                 error('focusing', obj)
                 obj.focus()
                 sched.wait_read(sys.stdin.fileno(), Task(self.process_user_input(main), label='process user input'))
