@@ -22,6 +22,7 @@ import time
 
 dom_query_cache = {}
 main_frame = None
+stdscr = None
 
 IntEnum._convert_(
         'Attribute',
@@ -542,6 +543,18 @@ class CSS:
         SM()
 
 
+def distill(*values):
+    res = []
+    for value in values:
+        if isinstance(value, Enum):
+            value = value.value
+        res.append(value)
+    if len(values) == 1:
+        return res[0]
+    else:
+        return res
+
+
 class FractionalUnit:
     """
     ratios to split up remaining space
@@ -1018,17 +1031,19 @@ class Widget:
     base type for other widgets
     """
     #
+    calc_best_fit = False              # if True, always call
     css_id = None
     css_class = ()
     css_elements = None
     border_style = None
     _built = False
     _focusable = False
+    inner_window = None                 # relative position from origin
     layouts = ()
     modal = False
     _parent = None
-    position = None
     orient = None
+    origin = None                   # actual stdscr upper-left corner  (Frames only)
     size = None
     sizes = ()
     sticky = None
@@ -1039,7 +1054,7 @@ class Widget:
     def __init__(
             self,
             id=None, css=None, title=None, border=None,
-            orient=None, parent=None, position=None,
+            orient=None, parent=None, origin=None,
             size=None, sticky=None, visible=None,
             **kwds
         ):
@@ -1077,9 +1092,9 @@ class Widget:
         if parent is not None:
             self.parent = parent
             if self is not main_frame:
-                self.parent.contained.append(self)
-        if position is not None:
-            self.position = position
+                self.parent._contained.append(self)
+        if origin is not None:
+            self.origin = origin
         if orient is not None:
             self.orient = orient
         elif self.orient is None:
@@ -1097,7 +1112,7 @@ class Widget:
             self._size = 0, 0
         if visible is not None:
             self.visible = visible
-        self.contained = []
+        self._contained = []
         if self.border_style:
             self._dfx = 2
             self._dfy = 2
@@ -1120,12 +1135,12 @@ class Widget:
         value = self.value
         id = self.css_id
         if not value and not id:
-            return "<%s>" % '.'.join(reversed(crumbs))
+            return "<%s: outer=%r, pos=%r>" % ('.'.join(reversed(crumbs)), self.outer_size, self.origin)
         else:
             value = id and str(id) or repr(value) 
             if len(value) > 32:
                 value = value[:28] + "...'"
-            return "<%s:%s>" % ('.'.join(reversed(crumbs)), value)
+            return "<%s:%s: outer=%r, pos=%r>" % ('.'.join(reversed(crumbs)), value, self.outer_size, self.origin)
 
     @property
     def outer_size(self):
@@ -1205,7 +1220,7 @@ class Widget:
         self.window.addnstr(*args)
         self.window.noutrefresh()
 
-    def add_string(self, *args):
+    def add_string(self, y, x, string, attr=A_NORMAL, origin='window'):
         """
         add_string([y, x,] str, [attr])
 
@@ -1221,52 +1236,70 @@ class Widget:
         By default, the character position and attributes are the
         current settings for the window object.
         """
-        error(self.__class__.__name__, 'Widget.add_string')
-        self.window.addstr(*args)
-        self.window.noutrefresh()
+        error(self.__class__.__name__, 'Widget.add_string', y, x, string)
+        attr = distill(attr)
+        wy, wx, _, _ = self.get_wyxd(origin)
+        stdscr.addstr(wy+y, wx+x, string, attr)
+        stdscr.noutrefresh()
 
     def attr_off(self, attr):
         """
         Remove attribute attr from the "background" set.
         """
+        attr = distill(attr)
         self.window.attroff(attr)
 
     def attr_on(self, attr):
         """
         Add attribute attr to the "background" set.
         """
+        attr = distill(attr)
         self.window.attron(attr)
 
     def attr_set(self, attr):
         """
         Set the "background" set of attributes.
         """
+        attr = distill(attr)
         self.window.attrset(attr)
         self.window.noutrefresh()
 
-    def bkgd(self, ch, attr=0):
+    def bkgd(self, ch, attr=A_NORMAL):
         """
         Set the background property of the window.
 
           ch    Background character.
           attr  Background attributes.
         """
+        attr = distill(attr)
         self.window.bkgd(ch, attr)
 
-    def bkgd_set(self, ch, attr=0):
+    def bkgd_set(self, ch, attr=A_NORMAL):
         """
         Set the window's background.
 
           ch    Background character.
           attr  Background attributes.
         """
+        attr = distill(attr)
         self.window.bkgdset(ch, attr)
         self.window.noutrefresh()
 
     def blur(self):
+        error(self.__class__.__name__, 'Widget.blur')
+        if self.modal:
+            error('    nope')
+            return
+        if sched.focus is self:
+            sched.focus = None
+        if self.border_style:
+            self.border(attr=curses.color_pair(1)|A_NORMAL)
+        else:
+            self.paint(attr=curses.color_pair(1)|A_NORMAL)
+        stdscr.noutrefresh()
         return self
 
-    def border(self, type=SINGLE, ctrl_window=None):
+    def border(self, type=SINGLE, attr=A_NORMAL):
         """
         Draw a border around the edges of the window.
 
@@ -1285,106 +1318,110 @@ class Widget:
         used for that parameter.
         """
         error(self.__class__.__name__, 'Widget.border')
+        attr = distill(attr)
         if type is SPACE:
             ls = rs = ts = bs = tl = tr = bl = br = 32
         elif type is SINGLE:
-            ls = rs = ts = bs = tl = tr = bl = br = 0
-        # elif type is DOUBLE:
-        #     ls = rs = ...
-        #     ts = bs = ...
-        #     tl = ...
-        #     tr = ...
-        #     bl = ...
-        #     br = ...
+            ls = rs = ACS_VLINE.value
+            ts = bs = ACS_HLINE.value
+            tl = ACS_ULCORNER.value
+            tr = ACS_URCORNER.value
+            bl = ACS_LLCORNER.value
+            br = ACS_LRCORNER.value
         else:
-            ls = rs = ts = bs = tl = tr = bl = br = ord(type)
-            # raise ValueError('unknown border type: %r' % type)
-        if ctrl_window is None:
-            ctrl_window = self.window
-        ctrl_window.border(ls, rs, ts, bs, tl, tr, bl, br)
-        ctrl_window.noutrefresh()
+            ls = rs = ts = bs = tl = tr = bl = br = type
+        y1, x1 = self.origin
+        h,  w  = self.outer_size
+        y2, x2 = y1+h-1, x1+w-1
+        error('  ', y1, x1, '   ', y2, x2)
+        stdscr.hline(y1, x1, ts, w, attr)
+        stdscr.hline(y2, x1, bs, w, attr)
+        stdscr.vline(y1, x1, ls, h, attr)
+        stdscr.vline(y1, x2, rs, h, attr)
+        stdscr.addch(y1, x1, tl, attr)
+        stdscr.addch(y1, x2, tr, attr)
+        stdscr.addch(y2, x1, bl, attr)
+        try:
+            stdscr.addch(y2, x2, br, attr)
+        except:
+            pass
+        stdscr.noutrefresh()
 
-    def box(self, vert_ch=0, horz_ch=0):
+    def build(self, _skip_self=False, **kwds):
         """
-        Draw a border around the edges of the window.
-
-          vert_ch   Left and right side.
-          horz_ch   Top and bottom side.
-
-        Similar to border(), but both ls and rs are vert_ch and both ts and bs are
-        horz_ch.  The default corner characters are always used by this function.
+        y, x = origin in parent space
+        height, width = available space in parent space
         """
-        self.border_window.box(vert_ch, horz_ch)
-        self.border_window.noutrefresh()
-
-    def build(self, y, x, height, width, rel=None, ctrl_win=None, _skip_self=False, **kwds):
-        error(self.__class__.__name__, 'Widget.build', y, x, height, width)
+        error(self.__class__.__name__, 'Widget.build')
         if not _skip_self:
-            if x == width or y == height:
-                # fail early
-                error('WILL NOT FIT')
-                raise InsufficientSpace('%r does not fit in %r' % (self, self.parent))
-            if self.inner_size == (0, 0):
-                self._calc_best_fit(height-y, width-x)
-            h, w = self.inner_size
-            error('h, w =', h, w)
-            if h > height or w > width:
-                h, w = height, width
-            by, bx = self.outer_size
-            # trim_size = (by, bx) == (0, 0)
-            # error('self.outer_size', self.outer_size)
-            # error('y=%r  x=%r' % (y, x))
-            # error('%r+%r>%r  or %r+%r>%r' % (by, y, height, bx, x, width))
-            if by+y > height or bx+x > width:
-                error('DID NOT FIT')
-                raise InsufficientSpace('%r does not fit in %r' % (self, self.parent))
+            # first attempt
+            y, x = self.parent.clear_primary
+            dy, dx = self.parent.clear_alternate
+            h, w = self.parent.inner_size
+            ah, aw = h-y, w-x                               # available height|width
+            rh, rw = self._size                             # requested height|width
+            error('orient: %s   y,x: %r   dy,dx: %r   h,w: %r   ah,aw: %r' % (self.orient, (y,x), (dy,dx), (h,w), (ah,aw)))
+            if self.inner_size == (0, 0) or self.calc_best_fit:
+                self._calc_best_fit(min(rh, ah), min(rw, aw))
+            wh, ww = self.inner_size                        # widget height|width
+            bh, bw = self.outer_size                        # aka border size
+            if bh > ah or bw > aw:
+                # second attempt
+                if self.orient is HORIZONTAL:
+                    x = dx = 0
+                    y = dy
+                else: # VERTICAL
+                    y = dy = 0
+                    x = dx
+                ah, aw = h-y, w-x
+                if self.inner_size == (0, 0) or self.calc_best_fit:
+                    self._calc_best_fit(min(rh, ah), min(rw, aw))
+                if bh > ah or bw > aw:
+                    raise InsufficientSpace('%r will not fit in %r' % (self, self.parent))
+            oy, ox = self.parent.origin
+            py, px = self.parent.inner_window
+            self.origin = y+oy+py, x+ox+px
             # do we need to increase the size?
             if EAST_WEST in self.sticky:
-                bx = width - x
+                bw = aw
             if NORTH_SOUTH in self.sticky:
-                by = height - y
+                bh = ah
             # update size in case sticky changed it
-            self.outer_size = by, bx
-            # get updated wy, wx
-            wy, wx = self.inner_size
-            if ctrl_win is None:
-                ctrl_win = self.parent.window
-            # self.ctrl_win = ctrl_win
-            if rel in (None, 'window'):
-                make_win = ctrl_win.derwin
-            elif rel in ('screen', ):
-                make_win = ctrl_win.subwin
-            else:
-                raise InvalidSelection('%r should be "screen" or "window"' % rel)
-            if self.border_style:
-                # error('final:', by, bx, y, x)
-                self.border_window = make_win(by, bx, y, x)
-                self.border_window.clear()
-                iy, ix = self.inner_window
-                self.window = self.border_window.derwin(wy, wx, iy, ix)
-                self.window.clear()
-            else:
-                self.window = self.border_window = make_win(wy, wx, y, x)
-                self.window.clear()
-            self.widget = self.window
+            self.outer_size = bh, bw
+            # widget_y, widget_x = self.outer_size
+            if self.orient is HORIZONTAL:
+                x += bw
+                dy = max(dy, y+bh)
+            else:  # VERTICAL
+                y += bh
+                dx = max(dx, x+bw)
+            error('orient: %s   y,x: %r   dy,dx: %r' % (self.orient, (y,x), (dy,dx)))
+            self.parent.clear_primary = y, x
+            self.parent.clear_alternate = dy, dx
         # frame built, now build contained widgets
+        error('self:', self)
         self._built = True
-        for widget in self.contained:
+        for widget in self._contained:
             if widget.visible:
                 error('building', widget)
-                self.build_contained(widget)
+                widget.build()
 
     def _calc_best_fit(self, height, width):
         error('_calc_best_fit', height, width)
-        for layout, size in zip(self.layouts, self.sizes):
-            if size.height <= height and size.width <= width:
-                error('  setting inner to', size)
-                self.inner_size = size
-                self.layout = layout
+        h = height
+        w = width
+        if self.orient is HORIZONTAL:
+            layouts = list(self.layouts)
+            sizes = list(self.sizes)
+        else:   # assume VERTICAL
+            layouts = reversed(self.layouts)
+            sizes = reversed(self.sizes)
+        l, s = None, (1, 1)                         # in case layouts and sizes are not speficied
+        for l, s in zip(layouts, sizes):
+            if s[0] <= h and s[1] <= w:
                 break
-        else:
-            error('  setting outer to', height, width)
-            self.outer_size = height, width
+        self.inner_size = s
+        self.layout = l
 
     def change_attr(self, *args, ctrl_window=None):
         """
@@ -1404,13 +1441,20 @@ class Widget:
         ctrl_window.chgat(*args)
         ctrl_window.noutrefresh()
 
-    def clear(self):
+    def clear(self, origin='window'):
         """
         Like erase(), but also cause the whole window to be repainted upon next call
         to refresh().
         """
         error(self.__class__.__name__, 'Widget.clear')
-        self.window.clear()
+        if self is main_frame:
+            stdscr.clear()
+        else:
+            y, x = self.origin
+            h, w = self.outer_size
+            error('clear:', y, x, '   ', h, w)
+            for y in range(y, y+h):
+                stdscr.addstr(y, x, ' '*w)
 
     def clear_ok(self, flag):
         """
@@ -1461,28 +1505,29 @@ class Widget:
         error(self.__class__.__name__, 'Widget.dismiss')
         if sched.focus is self:
             sched.focus = None
-        for w in self.contained:
+        for w in self._contained:
             w.dismiss(cascade=False)
         self.visible = False
         self._built = False
         self.window = None
         self.border_window = None
         if cascade:
-            error('%r.contained =' % self.parent.__class__.__name__, self.parent.contained)
-            if self in self.parent.contained:
-                error('removing %r from %r' % (self, self.parent.contained))
-                self.parent.contained.remove(self)
+            error('%r._contained =' % self.parent.__class__.__name__, self.parent._contained)
+            if self in self.parent._contained:
+                error('removing %r from %r' % (self, self.parent._contained))
+                self.parent._contained.remove(self)
             error(self.parent, 'is refreshing')
             self.parent.paint()
             self.parent.refresh()
 
-    def echo_char(self, ch, attr=0):
+    def echo_char(self, ch, attr=A_NORMAL):
         """
         Add character ch with attribute attr, and refresh.
 
           ch    Character to add.
           attr  Attributes for the character.
         """
+        attr = distill(attr)
         self.window.echochar(ch, attr)
         self.window.noutrefresh()
 
@@ -1513,7 +1558,23 @@ class Widget:
         self.window.noutrefresh()
 
     def focus(self):
-        raise TypeError('%r cannot be focused' % self)
+        # make sure currently focused widget is not modal
+        error(self.__class__.__name__, 'Frame.focus')
+        error('Frame current focus:', sched.focus)
+        if sched.focus:
+            if sched.focus.modal:
+                if not self.is_ancestor(sched.focus):
+                    return
+            else:
+                sched.focus.blur()
+        sched.focus = self
+        if self.border_style:
+            self.border(attr=curses.color_pair(1)|A_BOLD)
+        else:
+            self.paint(attr=curses.color_pair(1)|A_BOLD)
+        error('new focus:', sched.focus)
+        stdscr.noutrefresh()
+        return self
 
     def get_beginning_yx(self):
         """
@@ -1601,11 +1662,24 @@ class Widget:
                 raise TypeError('need to specify both x and y, or neither')
         return self.window.get_wch(*args)
 
+    def get_wyxd(self, origin='window'):
+        wy, wx = self.origin
+        wh, ww = self.outer_size
+        if origin == 'window':
+            dy, dx = self.inner_window
+            wy += dy
+            wx += dx
+            wh, ww = self.inner_size
+        return wy, wx, wh, ww
+
     def get_yx(self):
         """
         Return cursor position in window.
         """
         return self.getyx()
+
+    def has_focus(self):
+        return sched.focus is self
 
     def hide(self):
         """
@@ -1616,6 +1690,25 @@ class Widget:
         self.window = None
         self.border_window = None
         self.parent.window.noutrefresh()
+
+    def hline(self, y, x, n, ch=None, attr=A_NORMAL):
+        """
+        hline([y, x,] ch, n, [attr=_curses.A_NORMAL])
+
+        Display a horizontal line.
+
+          y     Starting line number.
+          x     Starting column number.
+          n     Line length.
+          ch    Character to draw.
+          attr  Attributes for the characters.
+        """
+        if ch is None:
+            ch = ACS_HLINE
+        attr, ch = distill(attr, ch)
+        wy, wx, wh, ww = self.get_wyxd()
+        stdscr.hline(y+wy, x+wx, ch, n, attr)
+        stdscr.noutrefresh()
 
     @staticmethod
     def horizontal(rows, cols, size):
@@ -1812,8 +1905,43 @@ class Widget:
         self.window = None
         self.border_window = None
         h, w = self.parent.inner_size
-        self.build(y, x, h, w)
+        self.build()
         self.no_update_refresh()
+
+    def next(self):
+        """
+        cycle forward through focusable elements
+        """
+        # if self is main_frame or isinstance(self, Frame) and not self._focusable:
+        if self is main_frame or self.modal:
+            p = self
+            contained = self._contained
+            i = -1
+        else:
+            p = self.parent
+            contained = p._contained
+            i = contained.index(self)
+        while "searching for next focus":
+            i += 1
+            if i >= len(contained):
+                if p.modal or p is main_frame:
+                    i = 0
+                else:
+                    contained = p.parent._contained
+                    i = contained.index(p)
+                    p = p.parent
+                    continue
+            current = contained[i]
+            if current._contained:
+                contained = current._contained
+                current = contained[0]
+                i = 0
+                p = current
+            if current._focusable:
+                break
+        if current is not self:
+            self.blur()
+            current.focus()
 
     def no_delay(self, flag):
         """
@@ -1840,27 +1968,60 @@ class Widget:
         that, call doupdate().
         """
         error(self.__class__.__name__, 'Widget.no_update_refresh')
-        self.window.noutrefresh()
+        stdscr.noutrefresh()
 
-    def paint(self, cascade=True):
+    def paint(self, attr=A_NORMAL, cascade=True):
         """
         Paint self and all contained widgets.
         """
         error(self.__class__.__name__, 'Widget.paint')
         if not self.visible or not self._built:
             return False
+        attr = distill(attr)
         self.clear()
         if self.border_style:
-            self.border(self.border_style, ctrl_window=self.border_window)
+            self.border(self.border_style, attr=attr)
         if self.title:
-            self.border_window.addstr(0, 1, '---| %s |---' % self.title)
-        self.border_window.noutrefresh()
-        error('%s.contained:' % self.__class__.__name__, self.contained)
+            self.add_string(0, 1, '---| %s |---' % self.title, origin='border', attr=attr)
+        error('%s._contained:' % self.__class__.__name__, self._contained)
         if cascade:
-            for widget in self.contained:
+            for widget in self._contained:
                 if widget.visible:
-                    widget.paint()
-        self.window.noutrefresh()
+                    widget.paint(attr=attr, cascade=cascade)
+
+    def prev(self):
+        """
+        cycle backward through focusable elements
+        """
+        if self is main_frame:
+            p = self
+            contained = self._contained
+            i = len(contained)
+        else:
+            p = self.parent
+            contained = p._contained
+            i = contained.index(self)
+        while "searching for previous focusable":
+            i -= 1
+            if i < 0:
+                if p.modal or p is main_frame:
+                    i = len(contained) - 1
+                else:
+                    contained = p.parent._contained
+                    i = contained.index(p)
+                    p = p.parent
+                    continue
+            current = contained[i]
+            if current._contained:
+                contained = current._contained
+                current = contained[-1]
+                i = len(contained) - 1
+                p = current
+            if current._focusable:
+                break
+        if current is not self:
+            self.blur()
+            current.focus()
 
     def process_key(self, event):
         """
@@ -1905,7 +2066,7 @@ class Widget:
         Synchronize actual screen with previous drawing/deleting methods.
         """
         error(self.__class__.__name__, 'Widget.refresh')
-        self.window.refresh()
+        stdscr.refresh()
 
     def resize(self, lines, cols):
         """
@@ -2006,216 +2167,6 @@ class Widget:
                 yield y, x*cell_size
 
 
-class Frame(Widget):
-    """
-    holder of other widgets
-    """
-    modal = False
-
-    def __init__(self, *args, modal=None, **kwds):
-        error(self.__class__.__name__, 'Frame.__init__')
-        super().__init__(*args, **kwds)
-        if modal is not None:
-            self.modal = modal
-        self.clear_primary = 0, 0
-        self.clear_alternate = 0, 0
-
-    def add_widget(self, widget):
-        """
-        Include widget in size calculation.
-        """
-        error(self.__class__.__name__, 'Frame.add_widget')
-        if isinstance(widget, type):
-            widget = widget()
-        if widget.parent is None:
-            widget.parent = self
-            self.contained.append(widget)
-        elif widget.parent is not self:
-            raise ValueError("widget %r added to %r with a parent of %r" % (widget, self, widget.parent))
-        return widget
-
-    def blur(self):
-        error(self.__class__.__name__, 'Frame.blur')
-        if self.modal:
-            error('    nope')
-            return
-        if sched.focus is self:
-            sched.focus = None
-        self.border_window.bkgd(' ', curses.color_pair(0))
-        self.paint()
-        # self.parent.paint() #cascade=False)
-        return self
-
-    def build_contained(self, widget):
-        error(self.__class__.__name__, 'Frame.build_contained')
-        # error('clear primary:', self.clear_primary)
-        # error('    alternate: ', self.clear_alternate)
-        y, x = self.clear_primary
-        dy, dx = self.clear_alternate
-        lines, cols = self.inner_size
-        # error('  with', y, x, lines, cols)
-        try:
-            widget.build(y, x, lines, cols)
-        except InsufficientSpace:
-            if self.orient is HORIZONTAL:
-                x = dx = 0
-                y = dy
-            else: # VERTICAL
-                y = dy = 0
-                x = dx
-            widget.build(y, x, lines, cols)
-        # widget successfully drawn on screen
-        # error('Frame.build_contained: setting visible = True')
-        widget.visible = True
-        # error('widget', widget.title, 'is', widget.visible)
-        widget_y, widget_x = widget.outer_size
-        if self.orient is HORIZONTAL:
-            x += widget_x
-            dy = max(dy, y+widget_y)
-        else:  # VERTICAL
-            y += widget_y
-            dx = max(dx, x+widget_x)
-        self.clear_primary = y, x
-        self.clear_alternate = dy, dx
-
-    def derive_window(self, *args, **kwds):
-        """
-        derive_window([ncols=0, nlines=0,] begin_x, begin_y)
-
-        Create a sub-window (window-relative coordinates).
-
-          nlines    Height.
-          ncols     Width.
-          begin_x   Left side x-coordinate.
-          begin_y   Top side y-coordinate.
-
-        der_win() is the same as calling sub_win(), except that begin_x and begin_y
-        are relative to the origin of the window, rather than relative to the entire
-        screen.
-        """
-        error(self.__class__.__name__, 'Frame.derive_window')
-        return Frame(parent=self, rel='window', *args, **kwds)
-
-    def focus(self):
-        # make sure currently focused widget is not modal
-        error(self.__class__.__name__, 'Frame.focus')
-        error('Frame current focus:', sched.focus)
-        if sched.focus:
-            if sched.focus.modal:
-                if not self.is_ancestor(sched.focus):
-                    return
-            else:
-                sched.focus.blur()
-        sched.focus = self
-        self.border_window.bkgd(' ', curses.color_pair(1)|A_BOLD)
-        self.paint()
-        error('new focus:', sched.focus)
-        return self
-
-    def has_focus(self):
-        return sched.focus is self
-
-    def hline(self, *args):
-        """
-        hline([y, x,] ch, n, [attr=_curses.A_NORMAL])
-
-        Display a horizontal line.
-
-          y     Starting line number.
-          x     Starting column number.
-          ch    Character to draw.
-          n     Line length.
-          attr  Attributes for the characters.
-        """
-        self.window.hline(*args)
-        self.window.noutrefresh()
-
-    def next(self):
-        """
-        cycle forward through focusable elements
-        """
-        # if self is main_frame or isinstance(self, Frame) and not self._focusable:
-        if self is main_frame or self.modal:
-            p = self
-            contained = self.contained
-            i = -1
-        else:
-            p = self.parent
-            contained = p.contained
-            i = contained.index(self)
-        while "searching for next focus":
-            i += 1
-            if i >= len(contained):
-                if p.modal or p is main_frame:
-                    i = 0
-                else:
-                    contained = p.parent.contained
-                    i = contained.index(p)
-                    p = p.parent
-                    continue
-            current = contained[i]
-            if current.contained:
-                contained = current.contained
-                current = contained[0]
-                i = 0
-                p = current
-            if current._focusable:
-                break
-        if current is not self:
-            self.blur()
-            current.focus()
-
-    def prev(self):
-        """
-        cycle backward through focusable elements
-        """
-        if self is main_frame:
-            p = self
-            contained = self.contained
-            i = len(contained)
-        else:
-            p = self.parent
-            contained = p.contained
-            i = contained.index(self)
-        while "searching for previous focusable":
-            i -= 1
-            if i < 0:
-                if p.modal or p is main_frame:
-                    i = len(contained) - 1
-                else:
-                    contained = p.parent.contained
-                    i = contained.index(p)
-                    p = p.parent
-                    continue
-            current = contained[i]
-            if current.contained:
-                contained = current.contained
-                current = contained[-1]
-                i = len(contained) - 1
-                p = current
-            if current._focusable:
-                break
-        if current is not self:
-            self.blur()
-            current.focus()
-
-    def sub_window(self, *args, **kwds):
-        """
-        sub_window([ncols=0, nlines=0,] begin_x, begin_y)
-
-        Create a sub-window (screen-relative coordinates).
-
-          ncols     Width.
-          nlines    Height.
-          begin_x   Left side x-coordinate.
-          begin_y   Top side y-coordinate.
-
-        By default, the sub-window will extend from the specified position to the
-        lower right corner of the containing window.
-        """
-        error(self.__class__.__name__, 'Frame.sub_window')
-        return Frame(parent=self, rel='screen', *args, **kwds)
-
     def vline(self, *args):
         """
         vline([y, x,] ch, n, [attr=_curses.A_NORMAL])
@@ -2228,22 +2179,82 @@ class Frame(Widget):
           n     Line length.
           attr  Attributes for the character.
         """
-        self.window.vline(*args)
-        self.window.noutrefresh()
+        stdscr.vline(*args)
+        stdscr.noutrefresh()
 
+
+class Frame(Widget):
+    """
+    holder of other widgets
+    """
+    modal = False
+
+    def __init__(self, *args, modal=None, **kwds):
+        error(self.__class__.__name__, 'Frame.__init__')
+        super().__init__(*args, **kwds)
+        if modal is not None:
+            self.modal = modal
+        self.clear_primary = 0, 0                       # both are relative to self.origin
+        self.clear_alternate = 0, 0
+
+    def add_widget(self, widget):
+        """
+        Include widget in size calculation.
+        """
+        error(self.__class__.__name__, 'Frame.add_widget')
+        if isinstance(widget, type):
+            widget = widget()
+        if widget.parent is None:
+            widget.parent = self
+            self._contained.append(widget)
+        elif widget.parent is not self:
+            raise ValueError("widget %r added to %r with a parent of %r" % (widget, self, widget.parent))
+        return widget
+
+    def build_contained(self, widget):
+        error(self.__class__.__name__, 'Frame.build_contained')
+        error('clear primary:', self.clear_primary)
+        error('    alternate: ', self.clear_alternate)
+        y, x = self.clear_primary
+        dy, dx = self.clear_alternate
+        lines, cols = self.inner_size
+        error('  with', y, x, lines, cols)
+        try:
+            widget.build(y, x, lines, cols)
+        except InsufficientSpace:
+            if self.orient is HORIZONTAL:
+                x = dx = 0
+                lines -= dy - y
+                y = dy
+            else: # VERTICAL
+                y = dy = 0
+                cols -= dx - x
+                x = dx
+            widget.build(y, x, lines, cols)
+        # widget successfully drawn on screen
+        widget.visible = True
+        widget_y, widget_x = widget.outer_size
+        if self.orient is HORIZONTAL:
+            x += widget_x
+            dy = max(dy, y+widget_y)
+        else:  # VERTICAL
+            y += widget_y
+            dx = max(dx, x+widget_x)
+        error('orient: %s   y,x: %r   dy,dx: %r' % (self.orient, (y,x), (dy,dx)))
+        self.clear_primary = y, x
+        self.clear_alternate = dy, dx
 
 class MainFrame(Frame):
     """
     There can be only one.
     """
     _focusable = True
-    stdscr = None
-    status_win = None
+    # status_win = None
 
     def __init__(self, status=None, **kwds):
         error(self.__class__.__name__, 'MainFrame.__init__')
-        global main_frame
-        if self.stdscr is not None:
+        global main_frame, stdscr
+        if stdscr is not None:
             raise RuntimeError('can only call MainFrame once')
         main_frame = self
         super().__init__(**kwds)
@@ -2251,8 +2262,8 @@ class MainFrame(Frame):
 
     def __enter__(self):
         # initialize curses
-        global ACS
-        self.border_window = self.stdscr = curses.initscr()
+        global ACS, stdscr
+        stdscr = curses.initscr()
         ACS = IntEnum._convert_(
                 'ACS',
                 'curses',
@@ -2265,12 +2276,12 @@ class MainFrame(Frame):
         curses.raw()
         curses.start_color()
         curses.init_pair(1, COLOR_YELLOW, COLOR_BLACK)
-        self.stdscr.keypad(True)
-        self.stdscr.nodelay(False)
+        stdscr.keypad(True)
+        stdscr.nodelay(False)
         curses.curs_set(0)
         curses.mousemask(ALL_MOUSE_EVENTS)
         # figure out window sizes
-        outer_height, outer_width = self.border_window.getmaxyx()
+        outer_height, outer_width = stdscr.getmaxyx()
         inner_height, inner_width = outer_height-self._dfy, outer_width-self._dfx
         self.inner_size = inner_height, inner_width
         inner_y, inner_x = self.inner_window
@@ -2278,34 +2289,31 @@ class MainFrame(Frame):
             inner_height -= 2
             self._dfy += 2
             self.inner_size = inner_height, inner_width
-            self.status_win = StatusLine(size=(2, inner_width), position=(outer_height-3, inner_x), parent=self)
-            Signal('Event').connect(self.status_win.on_event)
-        if self.border_style or self.show_status or self.title:
-            self.window = self.border_window.derwin(inner_height, inner_width, inner_y, inner_x)
-        else:
-            self.window = self.border_window
-        self.inner_window = inner_x, inner_y
+            status_win = self.add_widget(StatusLine(size=(2, inner_width), origin=(outer_height-3, inner_x)))
+            # self.status_win = StatusLine(size=(2, inner_width), origin=(outer_height-3, inner_x), parent=self)
+            Signal('Event').connect(status_win.on_event)
         return self
 
     def __exit__(self, *args):
         curses.nocbreak()
-        self.stdscr.keypad(False)
+        stdscr.keypad(False)
         curses.echo()
         curses.endwin()
 
     def build(self):
         error(self.__class__.__name__, 'MainFrame.build')
         height, width = self.inner_size
-        super().build(0, 0, height, width, _skip_self=True)
-        if self.status_win is not None:
-            self.status_win.build()
+        self.origin = 0, 0
+        super().build(_skip_self=True)
+        # if self.status_win is not None:
+        #     self.status_win.build()
 
-    def paint(self, cascade=True):
+    def paint(self, attr=A_NORMAL, cascade=True):
         error(self.__class__.__name__, 'MainFrame.paint')
-        super().paint(cascade=cascade)
-        if self.status_win is not None:
-            self.status_win.paint()
-        self.refresh()
+        super().paint(attr=attr, cascade=cascade)
+        # if self.status_win is not None:
+        #     self.status_win.paint()
+        stdscr.refresh()
 
 
 class Label(Widget):
@@ -2320,18 +2328,18 @@ class Label(Widget):
         width = max([len(l) for l in lines])
         self.inner_size = len(lines), width
 
-    def paint(self, cascade=True):
+    def paint(self, attr=A_NORMAL, cascade=True):
         """
         paint the Label text in the parent window starting at line, col
         """
         error(self.__class__.__name__, 'Label.paint')
         p = self.parent
         for i, line in enumerate(self.value):
-            p.add_string(i, 0, line)
+            p.add_string(i, 0, line, attr)
         p.no_update_refresh()
 
 
-class Entry(Frame):
+class Entry(Widget):
     """
     enter one line of text
     """
@@ -2344,15 +2352,32 @@ class TextBox(Frame):
     """
     _focusable = True
     read_only = False
+    cursor = 0, 0
+    cursor_state = 1        # 'insert'
 
-    def paint(self, cascade=True):
+    def build(self, *args, **kwds):
+        super().build(*args, **kwds)
+        self.keypad(True)
+
+    def blur(self):
+        self.cursor = self.window.getyx()
+        super().blur()
+
+    def focus(self):
+        # window.getyx(), window.move()
+        # stdscr.move(*self.cursor)
+        stdscr.move(5, 10)
+        super().focus()
+        curses.curs_set(self.cursor_state)
+
+    def paint(self, attr=A_NORMAL, cascade=True):
         error(self.__class__.__name__, 'TextBox.paint')
-        super().paint(cascade=cascade)
+        super().paint(attr=attr, cascade=cascade)
         if self.value:
-            self.add_string(0, 0, self.value)
+            self.add_string(0, 0, self.value, attr)
 
 
-class Button(Frame):
+class Button(Widget):
     """
     send a button-pressed event
     """
@@ -2379,13 +2404,10 @@ class Button(Frame):
             sched.ready.append(self.on_click)
         return True
 
-    def paint(self, cascade=True):
+    def paint(self, attr=A_NORMAL, cascade=True):
         error(self.__class__.__name__, 'Button.paint')
-        super().paint(cascade=cascade)
-        error('painting %r' % self.value)
-        error('window size:', self.get_max_yx())
-        error('button size:', self.outer_size)
-        self.add_string(0, 0, ' [%s]' % self.value)
+        super().paint(attr=attr, cascade=cascade)
+        self.add_string(0, 0, ' [%s]' % self.value, attr)
         self.no_update_refresh()
 
     def process_key(self, event):
@@ -2404,6 +2426,7 @@ class CheckBoxes(Frame):
     """
     select any of several options
     """
+    calc_best_fit = True
     choices = []
     current = None
     _focusable = True
@@ -2456,28 +2479,6 @@ class CheckBoxes(Frame):
         self.current = None
         return self
 
-    def build(self, y, x, height, width):
-        error(self.__class__.__name__, 'CheckBoxes.build')
-        if self.inner_size == (0, 0):
-            h, w = height, width
-        else:
-            h, w = self.inner_size
-            if h > height or w > width:
-                h, w = height, width
-        # select best fit
-        if self.orient is HORIZONTAL:
-            layouts = list(self.layouts)
-            sizes = list(self.sizes)
-        else:   # assume VERTICAL
-            layouts = reversed(self.layouts)
-            sizes = reversed(self.sizes)
-        for l, s in zip(layouts, sizes):
-            if s[0] <= h and s[1] <= w:
-                break
-        self.inner_size = s
-        self.layout = l
-        super().build(y, x, height, width)
-
     def focus(self):
         error(self.__class__.__name__, 'CheckBoxes.focus')
         if self.current is None:
@@ -2491,9 +2492,9 @@ class CheckBoxes(Frame):
         error('CB.focus() has self.current as %r' % self.current)
         return super().focus()
 
-    def paint(self, cascade=True):
+    def paint(self, attr=A_NORMAL, cascade=True):
         error(self.__class__.__name__, 'CheckBoxes.paint')
-        super().paint(cascade=cascade)
+        super().paint(attr=attr, cascade=cascade)
         layout = (self.vertical, self.horizontal)[self.orient is HORIZONTAL]
         rows, cols = self.layout
         layout = layout(rows, cols, self.cell_width)
@@ -2503,15 +2504,15 @@ class CheckBoxes(Frame):
             current = c == self.current
             selected = c in self.value
             y, x = next(layout)
-            attr = (A_NORMAL, A_UNDERLINE)[selected]
+            c_attr = attr | (A_NORMAL, A_UNDERLINE)[selected]
             if current:
                 text = '<%s>' % c
             else:
                 text = ' %s ' % c
-            self.add_string(y, x, text, attr)
+            self.add_string(y, x, text, c_attr)
             self._grid[(y, x)] = c
             self._grid[c] = y, x
-        self.no_update_refresh()
+        stdscr.noutrefresh()
 
     def process_key(self, event):
         error(self.__class__.__name__, 'CheckBoxes.process_key')
@@ -2593,6 +2594,8 @@ class Table(Frame):
 class ProgramStatus(Frame):
     """
     Display status message to user.
+
+    Only call after curses has been initialized.
     """
     border_style = SINGLE
     _focusable = False
@@ -2609,21 +2612,21 @@ class ProgramStatus(Frame):
         error('ProgramStatus.message.parent:', m.parent)
         error('ProgramStatus.button.parent:', b.parent)
         w, h = self.parent.inner_size
-        self.build(0, 0, w, h)
+        self.build()
         self.prev_focus = sched.focus.blur()
         error('saved %r as prev_focus' % self.prev_focus)
         self.focus()
         self.paint()
         self.refresh()
 
-    def build(self, y, x, height, width):
+    def build(self):
         error(self.__class__.__name__, 'ProgramStatus.build')
         l, c = self.outer_size
-        h, w = self.parent.inner_size
+        h, w = self.parent.outer_size
         y = (h-l) // 2
         x = (w-c) // 2
-        # error('final size:', self.inner_size)
-        super().build(y, x, height, width)
+        py, px = self.parent.origin
+        self.origin = py+y, px+x
 
     def dismiss(self):
         error('ProgramStatus.dismiss')
@@ -2634,7 +2637,8 @@ class ProgramStatus(Frame):
     def show_button(self):
         error(self.__class__.__name__, 'ProgramStatus.show_button')
         self.button.visible = True
-        self.build_contained(self.button)
+        # self.build_contained(self.button)
+        self.build()
         self.button.focus()
         self.button.refresh()
 
@@ -2673,30 +2677,32 @@ class QueryUser(Frame):
         self.prev_focus = sched.focus.blur()
         error('saved %r as prev_focus' % self.prev_focus)
         lines, cols = self.parent.inner_size
-        self.build(0, 0, lines, cols)
+        self.build()
         self.focus()
         self.paint()
         self.refresh()
 
-    def build(self, y, x, height, width):
+    def build(self):
         error(self.__class__.__name__, 'QueryUser.build')
         if self.inner_size == (0, 0):
-            self._calc_best_fit(height, width)
+            self._calc_best_fit(*self.parent.inner_size)
         if self.layout == HORIZONTAL:
             self.question.sticky = NS
         else:
             self.question.sticky = EW
         # center widget
         l, c = self.outer_size
-        h, w = self.parent.inner_size
+        h, w = self.parent.outer_size
         y = (h-l) // 2
         x = (w-c) // 2
+        py, px = self.parent.origin
+        self.origin = py+y, px+x
         error('final size:', self.inner_size)
-        super().build(y, x, height, width)
+        super().build(_skip_self=True)
 
-    def paint(self, cascade=True):
+    def paint(self, attr=A_NORMAL, cascade=True):
         error(self.__class__.__name__, 'QueryUser.paint')
-        super().paint(cascade=cascade)
+        super().paint(attr=attr, cascade=cascade)
 
     def process_key(self, event):
         error(self.__class__.__name__, 'QueryUser.process_key')
@@ -2726,23 +2732,23 @@ class StatusLine(Frame):
 
     def build(self, *args, **kwds):
         error(self.__class__.__name__, 'StatusLine.build')
-        y, x = self.position
-        height, width = self.inner_size
-        self.window = self.border_window = self.parent.border_window.subwin(height, width, y, x)
-        self.window.clear()
+        # y, x = self.position
+        # height, width = self.inner_size
+        # self.window = self.border_window = self.parent.border_window.subwin(height, width, y, x)
+        # self.window.clear()
 
     def on_event(self, msg):
         self.last_event = msg
         self.paint()
 
-    def paint(self, cascade=True):
+    def paint(self, attr=A_NORMAL, cascade=True):
         error(self.__class__.__name__, 'StatusLine.paint')
         height, width = self.inner_size
-        self.hline(0, 0, '_', width)
-        self.add_string(1, 0, "rows: %d,  cols:%d" % self.parent.border_window.getmaxyx())
-        self.add_string(1, 25, "color pairs: %d" % curses.COLOR_PAIRS)
-        self.add_string(1, 50, "event: %-50r" % (self.last_event, ))
-        self.no_update_refresh()
+        self.hline(0, 0, width)
+        self.add_string(1, 0, "rows: %d,  cols:%d" % stdscr.getmaxyx(), attr)
+        self.add_string(1, 25, "color pairs: %d" % curses.COLOR_PAIRS, attr)
+        self.add_string(1, 50, "event: %-50r" % (self.last_event, ), attr)
+        stdscr.noutrefresh()
 
 
 
@@ -2806,9 +2812,9 @@ class App:
                     path.append(name)
         return path
 
-    def paint(self, cascade=True):
+    def paint(self, attr=A_NORMAL, cascade=True):
         error(self.__class__.__name__, 'App.paint')
-        self.main.paint(cascade=cascade)
+        self.main.paint(attr=attr, cascade=cascade)
 
     def process_key(self, event):
         error(self.__class__.__name__, 'App.process_key')
@@ -2845,13 +2851,13 @@ class App:
             # find smallest widget that contains mouse event
             w = widget
             error('initial widgit:', w)
-            contained = w.contained[:]
+            contained = w._contained[:]
             error('initial contained:', contained)
             while contained:
                 w = contained.pop(0)
                 error('checking', w, event)
                 if w.encloses(event):
-                    contained = getattr(w, 'contained', [])[:]
+                    contained = getattr(w, '_contained', [])[:]
                     error('narrowing search to:', contained)
                     if not contained:
                         return w
@@ -2865,7 +2871,7 @@ class App:
                 return find_clicked_widget(self.main, fail=True)
         #
         while "user hasn't quit":
-            ch = main.stdscr.getch()
+            ch = stdscr.getch()
             if ch == -1:
                 event = None
             elif ch == KEY_MOUSE:
@@ -2936,8 +2942,8 @@ class App:
                 dom_query_cache[target] = current
                 return current
 
-            if current.contained:
-                contained = current.contained
+            if current._contained:
+                contained = current._contained
                 current = contained[0]
                 i = 0
                 p = current
@@ -2946,7 +2952,7 @@ class App:
                 while i >= len(contained):
                     if isinstance(p, App):
                         break
-                    contained = p.parent.contained
+                    contained = p.parent._contained
                     i = contained.index(p) + 1
                     p = p.parent
                 else:
@@ -2959,12 +2965,12 @@ class App:
 
     @on_key(KEY_CTRL_R)
     def redraw(self):
-        widgets = self.main.contained[:]
+        widgets = self.main._contained[:]
         i = 0
         while i < len(widgets):
             # get all the widgets
             f = widgets[i]
-            widgets.extend(getattr(f, 'contained', []))
+            widgets.extend(getattr(f, '_contained', []))
             i += 1
         # hide them
         for w in reversed(widgets):
@@ -2999,6 +3005,8 @@ class App:
                 # sched.focus = obj
                 error('focusing', obj)
                 obj.focus()
+                for w in main._contained:
+                    error(repr(w))
                 sched.wait_read(sys.stdin.fileno(), Task(self.process_user_input(main), label='process user input'))
                 sched.run()
         except KeyboardInterrupt:
@@ -3091,8 +3099,8 @@ if __name__ == '__main__':
             self.title = '%d enums' % len(self.value)
             self.paint()
 
-        def paint(self, cascade=True):
-            super().paint(cascade=cascade)
+        def paint(self, attr=A_NORMAL, cascade=True):
+            super().paint(attr=attr, cascade=cascade)
             iy, ix = self.inner_size
             cols = ix // 40
             rows = iy
@@ -3105,8 +3113,8 @@ if __name__ == '__main__':
                             y, x = next(layout)
                         except StopIteration:
                             break
-                        self.add_string(y, x, '%-25s %r' % (mbr.name, mbr.value))
-            self.no_update_refresh()
+                        self.add_string(y, x, '%-25s %r' % (mbr.name, mbr.value), attr)
+            stdscr.noutrefresh()
 
 
 
