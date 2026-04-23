@@ -1360,12 +1360,15 @@ class Widget:
             h, w = self.parent.inner_size
             ah, aw = h-y, w-x                               # available height|width
             rh, rw = self._size                             # requested height|width
+            if rh == 0:
+                rh = ah
+            if rw == 0:
+                rw = aw
             error('orient: %s   y,x: %r   dy,dx: %r   h,w: %r   ah,aw: %r' % (self.orient, (y,x), (dy,dx), (h,w), (ah,aw)))
             if self.inner_size == (0, 0) or self.calc_best_fit:
-                self._calc_best_fit(min(rh, ah), min(rw, aw))
-            wh, ww = self.inner_size                        # widget height|width
+                self._calc_best_fit(min(rh, ah)-self._dfy, min(rw, aw)-self._dfx)
             bh, bw = self.outer_size                        # aka border size
-            if bh > ah or bw > aw:
+            if bh > ah or bw > aw or ah <= 0 or aw <= 0:
                 # second attempt
                 if self.orient is HORIZONTAL:
                     x = dx = 0
@@ -1374,9 +1377,15 @@ class Widget:
                     y = dy = 0
                     x = dx
                 ah, aw = h-y, w-x
+                rh, rw = self._size                             # requested height|width
+                if rh == 0:
+                    rh = ah
+                if rw == 0:
+                    rw = aw
                 if self.inner_size == (0, 0) or self.calc_best_fit:
-                    self._calc_best_fit(min(rh, ah), min(rw, aw))
-                if bh > ah or bw > aw:
+                    self._calc_best_fit(min(rh, ah)-self._dfy, min(rw, aw)-self._dfx)
+                bh, bw = self.outer_size                        # in case _calc_best_fit changed the numbers
+                if bh > ah or bw > aw or ah <= 0 or aw <= 0:
                     raise InsufficientSpace('%r will not fit in %r' % (self, self.parent))
             oy, ox = self.parent.origin
             py, px = self.parent.inner_window
@@ -1408,20 +1417,25 @@ class Widget:
 
     def _calc_best_fit(self, height, width):
         error('_calc_best_fit', height, width)
+        if height <= 0 or width <= 0:
+            return
         h = height
         w = width
+        layouts = self.layouts or [None]
+        sizes = self.sizes or [(height, width)]
         if self.orient is HORIZONTAL:
-            layouts = list(self.layouts)
-            sizes = list(self.sizes)
+            layouts = list(layouts)
+            sizes = list(sizes)
         else:   # assume VERTICAL
-            layouts = reversed(self.layouts)
-            sizes = reversed(self.sizes)
-        l, s = None, (1, 1)                         # in case layouts and sizes are not speficied
+            layouts = reversed(layouts)
+            sizes = reversed(sizes)
         for l, s in zip(layouts, sizes):
+            error('  checking', s)
             if s[0] <= h and s[1] <= w:
+                error('    accepted')
+                self.inner_size = s
+                self.layout = l
                 break
-        self.inner_size = s
-        self.layout = l
 
     def change_attr(self, *args, ctrl_window=None):
         """
@@ -1895,8 +1909,14 @@ class Widget:
         """
         Move cursor to (line, col).
         """
-        self.window.move(y, x)
-        self.window.noutrefresh()
+        ay, ax, ah, aw = self.get_wyxd()
+        error(self.get_wyxd())
+        error(y, x, ay+y, ax+x)
+        # stdscr.move(ay+y, ax+x)
+        error(stdscr.getyx())
+        # stdscr.move(0, 0)
+        # curses.setsyx(ay+y, ax+x)
+        stdscr.noutrefresh()
 
     def move_window(self, y, x):
         """
@@ -2272,14 +2292,14 @@ class MainFrame(Frame):
                 )
         globals().update(ACS._member_map_)
         curses.noecho()
-        # curses.cbreak()
-        curses.raw()
+        curses.cbreak()
+        # curses.raw()
         curses.start_color()
-        curses.init_pair(1, COLOR_YELLOW, COLOR_BLACK)
+        # curses.init_pair(1, COLOR_YELLOW, COLOR_BLACK)
         stdscr.keypad(True)
-        stdscr.nodelay(False)
+        # stdscr.nodelay(False)
         curses.curs_set(0)
-        curses.mousemask(ALL_MOUSE_EVENTS)
+        # curses.mousemask(ALL_MOUSE_EVENTS)
         # figure out window sizes
         outer_height, outer_width = stdscr.getmaxyx()
         inner_height, inner_width = outer_height-self._dfy, outer_width-self._dfx
@@ -2355,18 +2375,18 @@ class TextBox(Frame):
     cursor = 0, 0
     cursor_state = 1        # 'insert'
 
-    def build(self, *args, **kwds):
-        super().build(*args, **kwds)
-        self.keypad(True)
-
-    def blur(self):
-        self.cursor = self.window.getyx()
-        super().blur()
+    def build(self):
+        super().build()
+        oy, ox = self.origin
+        iy, ix = self.inner_window
+        self.window = curses.newwin(oy+iy, ox+ix, *self.inner_size)
 
     def focus(self):
         # window.getyx(), window.move()
         # stdscr.move(*self.cursor)
-        stdscr.move(5, 10)
+        # stdscr.move(5, 10)
+        self.window.move(*self.cursor)
+        self.window.refresh()
         super().focus()
         curses.curs_set(self.cursor_state)
 
@@ -2609,8 +2629,6 @@ class ProgramStatus(Frame):
         self.message = m = self.add_widget(Label(message))
         self.button = b = self.add_widget(Button(button, on_click=Todo(self.dismiss), visible=show_button))
         self.inner_size = 2, max(m.outer_size.width, b.outer_size.width)
-        error('ProgramStatus.message.parent:', m.parent)
-        error('ProgramStatus.button.parent:', b.parent)
         w, h = self.parent.inner_size
         self.build()
         self.prev_focus = sched.focus.blur()
@@ -2627,6 +2645,7 @@ class ProgramStatus(Frame):
         x = (w-c) // 2
         py, px = self.parent.origin
         self.origin = py+y, px+x
+        super().build(_skip_self=True)
 
     def dismiss(self):
         error('ProgramStatus.dismiss')
@@ -2638,7 +2657,7 @@ class ProgramStatus(Frame):
         error(self.__class__.__name__, 'ProgramStatus.show_button')
         self.button.visible = True
         # self.build_contained(self.button)
-        self.build()
+        self.button.build()
         self.button.focus()
         self.button.refresh()
 
@@ -2697,12 +2716,7 @@ class QueryUser(Frame):
         x = (w-c) // 2
         py, px = self.parent.origin
         self.origin = py+y, px+x
-        error('final size:', self.inner_size)
         super().build(_skip_self=True)
-
-    def paint(self, attr=A_NORMAL, cascade=True):
-        error(self.__class__.__name__, 'QueryUser.paint')
-        super().paint(attr=attr, cascade=cascade)
 
     def process_key(self, event):
         error(self.__class__.__name__, 'QueryUser.process_key')
@@ -2732,10 +2746,6 @@ class StatusLine(Frame):
 
     def build(self, *args, **kwds):
         error(self.__class__.__name__, 'StatusLine.build')
-        # y, x = self.position
-        # height, width = self.inner_size
-        # self.window = self.border_window = self.parent.border_window.subwin(height, width, y, x)
-        # self.window.clear()
 
     def on_event(self, msg):
         self.last_event = msg
