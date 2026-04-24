@@ -1290,12 +1290,13 @@ class Widget:
         if self.modal:
             error('    nope')
             return
+        curses.curs_set(0)
         if sched.focus is self:
             sched.focus = None
         if self.border_style:
-            self.border(attr=curses.color_pair(1)|A_NORMAL)
+            self.border(attr=A_NORMAL)
         else:
-            self.paint(attr=curses.color_pair(1)|A_NORMAL)
+            self.paint(attr=A_NORMAL)
         stdscr.noutrefresh()
         return self
 
@@ -1333,7 +1334,6 @@ class Widget:
         y1, x1 = self.origin
         h,  w  = self.outer_size
         y2, x2 = y1+h-1, x1+w-1
-        error('  ', y1, x1, '   ', y2, x2)
         stdscr.hline(y1, x1, ts, w, attr)
         stdscr.hline(y2, x1, bs, w, attr)
         stdscr.vline(y1, x1, ls, h, attr)
@@ -1345,6 +1345,8 @@ class Widget:
             stdscr.addch(y2, x2, br, attr)
         except:
             pass
+        if self.title:
+            self.add_string(0, 1, '---| %s |---' % self.title, origin='border', attr=attr)
         stdscr.noutrefresh()
 
     def build(self, _skip_self=False, **kwds):
@@ -1574,7 +1576,6 @@ class Widget:
     def focus(self):
         # make sure currently focused widget is not modal
         error(self.__class__.__name__, 'Frame.focus')
-        error('Frame current focus:', sched.focus)
         if sched.focus:
             if sched.focus.modal:
                 if not self.is_ancestor(sched.focus):
@@ -1582,11 +1583,11 @@ class Widget:
             else:
                 sched.focus.blur()
         sched.focus = self
+        attr = curses.color_pair(1)|A_BOLD
         if self.border_style:
-            self.border(attr=curses.color_pair(1)|A_BOLD)
+            self.border(attr=attr)
         else:
-            self.paint(attr=curses.color_pair(1)|A_BOLD)
-        error('new focus:', sched.focus)
+            self.paint(attr=attr)
         stdscr.noutrefresh()
         return self
 
@@ -1686,11 +1687,15 @@ class Widget:
             wh, ww = self.inner_size
         return wy, wx, wh, ww
 
-    def get_yx(self):
+    def get_cursor(self):
         """
         Return cursor position in window.
         """
-        return self.getyx()
+        cy, cx = stdscr.getyx()
+        y, x, h, w = self.get_wyxd()
+        cy -= y
+        cx -= x
+        return cy, cx
 
     def has_focus(self):
         return sched.focus is self
@@ -1910,12 +1915,7 @@ class Widget:
         Move cursor to (line, col).
         """
         ay, ax, ah, aw = self.get_wyxd()
-        error(self.get_wyxd())
-        error(y, x, ay+y, ax+x)
-        # stdscr.move(ay+y, ax+x)
-        error(stdscr.getyx())
-        # stdscr.move(0, 0)
-        # curses.setsyx(ay+y, ax+x)
+        stdscr.move(ay+y, ax+x)
         stdscr.noutrefresh()
 
     def move_window(self, y, x):
@@ -2001,8 +2001,6 @@ class Widget:
         self.clear()
         if self.border_style:
             self.border(self.border_style, attr=attr)
-        if self.title:
-            self.add_string(0, 1, '---| %s |---' % self.title, origin='border', attr=attr)
         error('%s._contained:' % self.__class__.__name__, self._contained)
         if cascade:
             for widget in self._contained:
@@ -2292,12 +2290,11 @@ class MainFrame(Frame):
                 )
         globals().update(ACS._member_map_)
         curses.noecho()
-        curses.cbreak()
-        # curses.raw()
+        curses.raw()
         curses.start_color()
-        # curses.init_pair(1, COLOR_YELLOW, COLOR_BLACK)
+        curses.init_pair(1, COLOR_YELLOW, COLOR_BLACK)
         stdscr.keypad(True)
-        # stdscr.nodelay(False)
+        stdscr.nodelay(False)
         curses.curs_set(0)
         # curses.mousemask(ALL_MOUSE_EVENTS)
         # figure out window sizes
@@ -2310,7 +2307,6 @@ class MainFrame(Frame):
             self._dfy += 2
             self.inner_size = inner_height, inner_width
             status_win = self.add_widget(StatusLine(size=(2, inner_width), origin=(outer_height-3, inner_x)))
-            # self.status_win = StatusLine(size=(2, inner_width), origin=(outer_height-3, inner_x), parent=self)
             Signal('Event').connect(status_win.on_event)
         return self
 
@@ -2325,14 +2321,10 @@ class MainFrame(Frame):
         height, width = self.inner_size
         self.origin = 0, 0
         super().build(_skip_self=True)
-        # if self.status_win is not None:
-        #     self.status_win.build()
 
     def paint(self, attr=A_NORMAL, cascade=True):
         error(self.__class__.__name__, 'MainFrame.paint')
         super().paint(attr=attr, cascade=cascade)
-        # if self.status_win is not None:
-        #     self.status_win.paint()
         stdscr.refresh()
 
 
@@ -2374,27 +2366,84 @@ class TextBox(Frame):
     read_only = False
     cursor = 0, 0
     cursor_state = 1        # 'insert'
+    _value = ()
 
-    def build(self):
-        super().build()
-        oy, ox = self.origin
-        iy, ix = self.inner_window
-        self.window = curses.newwin(oy+iy, ox+ix, *self.inner_size)
+    @property
+    def value(self):
+        """
+        retrieve value from on-screen text box
+        """
+        pass
+
+    @value.setter
+    def value(self, new_value):
+        """
+        save value as multiple strings to fit in text box
+        """
+        y, x, h, w = self.get_wyxd()
+        incoming = new_value.strip().split('\n')
+        lines = []
+        for temp in incoming:
+            end = w - 1
+            while temp:
+                if len(temp) < w:
+                    lines.append(temp)
+                    temp = ''
+                    break
+                while end >= 0:
+                    if temp[end] in ' -,.':
+                        lines.append(temp[:end+1])
+                        temp = temp[end+1:].lstrip()
+                        break
+                    end -= 1
+                else:
+                    lines.append(temp[:w])
+                    temp = temp[w:].lstrip()
+                end = w - 1
+            lines.append('')
+        self._value = lines
 
     def focus(self):
         # window.getyx(), window.move()
-        # stdscr.move(*self.cursor)
-        # stdscr.move(5, 10)
-        self.window.move(*self.cursor)
-        self.window.refresh()
+        error('TextBox.focus()', self.cursor)
         super().focus()
+        self.move_cursor(*self.cursor)
+        assert self.cursor == self.get_cursor(), '%r != %r' % (self.cursor, self.get_cursor())
         curses.curs_set(self.cursor_state)
+
+    def _move_cursor(self, key):
+        cy, cx = self.get_cursor()
+        max_y, max_x = self.inner_size
+        max_y -= 1
+        max_x -= 1
+        if key is KEY_LEFT:
+            cx = max(0, cx-1)
+        elif key is KEY_RIGHT:
+            cx = min(max_x, cx+1)
+        elif key is KEY_UP:
+            cy = max(0, cy-1)
+        elif key is KEY_DOWN:
+            cy = min(max_y, cy+1)
+        elif key is KEY_HOME:
+            cx = 0
+        elif key is KEY_END:
+            cx = max_x
+        self.move_cursor(cy, cx)
 
     def paint(self, attr=A_NORMAL, cascade=True):
         error(self.__class__.__name__, 'TextBox.paint')
         super().paint(attr=attr, cascade=cascade)
-        if self.value:
-            self.add_string(0, 0, self.value, attr)
+        for i, line in enumerate(self._value):
+            self.add_string(i, 0, line, attr)
+
+    def process_key(self, event):
+        error(self.__class__.__name__, 'TextBox.process_key')
+        if event.key in (KEY_RIGHT, KEY_LEFT, KEY_UP, KEY_DOWN, KEY_HOME, KEY_END):
+            self._move_cursor(event.key)
+        else:
+            error(event, 'not handled')
+            return False # not handled
+        return True
 
 
 class Button(Widget):
@@ -2753,11 +2802,13 @@ class StatusLine(Frame):
 
     def paint(self, attr=A_NORMAL, cascade=True):
         error(self.__class__.__name__, 'StatusLine.paint')
+        current_cursor = stdscr.getyx()
         height, width = self.inner_size
         self.hline(0, 0, width)
         self.add_string(1, 0, "rows: %d,  cols:%d" % stdscr.getmaxyx(), attr)
         self.add_string(1, 25, "color pairs: %d" % curses.COLOR_PAIRS, attr)
         self.add_string(1, 50, "event: %-50r" % (self.last_event, ), attr)
+        stdscr.move(*current_cursor)
         stdscr.noutrefresh()
 
 
