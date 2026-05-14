@@ -10,6 +10,7 @@ from concurrent.futures import Future
 from curses import *
 import curses
 import heapq
+import logging
 import math
 import re
 from scription import error, print
@@ -19,6 +20,9 @@ from threading import Event as ThreadEvent, Thread, Lock as ThreadLock, current_
 import time
 
 ## globals
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
 dom_query_cache = {}
 main_frame = None
@@ -89,101 +93,101 @@ KEY_FS = 28
 KEY_GS = 29
 KEY_RS = 30
 KEY_US = 31
-# KEY_SPACE = 32
-# KEY_BANG = 33
-# KEY_QUOTE = 34
-# KEY_HASH = 35
-# KEY_DOLLAR = 36
-# KEY_PERCENT = 37
-# KEY_AMPERSAND = 38
-# KEY_APOSTROPHE = 39
-# KEY_LPAREN = 40
-# KEY_RPAREN = 41
-# KEY_STAR = 42
-# KEY_PLUS = 43
-# KEY_COMMA = 44
-# KEY_DASH = 45
-# KEY_PERIOD = 46
-# KEY_SLASH = 47
-# KEY_ZERO = 48
-# KEY_ONE = 49
-# KEY_TWO = 50
-# KEY_THREE = 51
-# KEY_FOUR = 52
-# KEY_FIVE = 53
-# KEY_SIX = 54
-# KEY_SEVEN = 55
-# KEY_EIGHT = 56
-# KEY_NINE = 57
-# KEY_COLON = 58
-# KEY_SCOLON = 59
-# KEY_LT = 60
-# KEY_EQ = 61
-# KEY_GT = 62
-# KEY_QUESTION = 63
-# KEY_AT = 64
-# KEY_CAP_A = 65
-# KEY_CAP_B = 66
-# KEY_CAP_C = 67
-# KEY_CAP_D = 68
-# KEY_CAP_E = 69
-# KEY_CAP_F = 70
-# KEY_CAP_G = 71
-# KEY_CAP_H = 72
-# KEY_CAP_I = 73
-# KEY_CAP_J = 74
-# KEY_CAP_K = 75
-# KEY_CAP_L = 76
-# KEY_CAP_M = 77
-# KEY_CAP_N = 78
-# KEY_CAP_O = 79
-# KEY_CAP_P = 80
-# KEY_CAP_Q = 81
-# KEY_CAP_R = 82
-# KEY_CAP_S = 83
-# KEY_CAP_T = 84
-# KEY_CAP_U = 85
-# KEY_CAP_V = 86
-# KEY_CAP_W = 87
-# KEY_CAP_X = 88
-# KEY_CAP_Y = 89
-# KEY_CAP_Z = 90
-# KEY_LBRACKET = 91
-# KEY_BACKSLASH = 92
-# KEY_RBRACKET = 93
-# KEY_CAROT = 94
-# KEY_UNDER = 95
-# KEY_BACKTICK = 96
-# KEY_A = 97
-# KEY_B = 98
-# KEY_C = 99
-# KEY_D = 100
-# KEY_E = 101
-# KEY_F = 102
-# KEY_G = 103
-# KEY_H = 104
-# KEY_I = 105
-# KEY_J = 106
-# KEY_K = 107
-# KEY_L = 108
-# KEY_M = 109
-# KEY_N = 110
-# KEY_O = 111
-# KEY_P = 112
-# KEY_Q = 113
-# KEY_R = 114
-# KEY_S = 115
-# KEY_T = 116
-# KEY_U = 117
-# KEY_V = 118
-# KEY_W = 119
-# KEY_X = 120
-# KEY_Y = 121
-# KEY_Z = 122
-# KEY_LBRACE = 123
-# KEY_PIPE = 124
-# KEY_RBRACE = 125
-# KEY_TILDE = 126
+    # KEY_SPACE = 32
+    # KEY_BANG = 33
+    # KEY_QUOTE = 34
+    # KEY_HASH = 35
+    # KEY_DOLLAR = 36
+    # KEY_PERCENT = 37
+    # KEY_AMPERSAND = 38
+    # KEY_APOSTROPHE = 39
+    # KEY_LPAREN = 40
+    # KEY_RPAREN = 41
+    # KEY_STAR = 42
+    # KEY_PLUS = 43
+    # KEY_COMMA = 44
+    # KEY_DASH = 45
+    # KEY_PERIOD = 46
+    # KEY_SLASH = 47
+    # KEY_ZERO = 48
+    # KEY_ONE = 49
+    # KEY_TWO = 50
+    # KEY_THREE = 51
+    # KEY_FOUR = 52
+    # KEY_FIVE = 53
+    # KEY_SIX = 54
+    # KEY_SEVEN = 55
+    # KEY_EIGHT = 56
+    # KEY_NINE = 57
+    # KEY_COLON = 58
+    # KEY_SCOLON = 59
+    # KEY_LT = 60
+    # KEY_EQ = 61
+    # KEY_GT = 62
+    # KEY_QUESTION = 63
+    # KEY_AT = 64
+    # KEY_CAP_A = 65
+    # KEY_CAP_B = 66
+    # KEY_CAP_C = 67
+    # KEY_CAP_D = 68
+    # KEY_CAP_E = 69
+    # KEY_CAP_F = 70
+    # KEY_CAP_G = 71
+    # KEY_CAP_H = 72
+    # KEY_CAP_I = 73
+    # KEY_CAP_J = 74
+    # KEY_CAP_K = 75
+    # KEY_CAP_L = 76
+    # KEY_CAP_M = 77
+    # KEY_CAP_N = 78
+    # KEY_CAP_O = 79
+    # KEY_CAP_P = 80
+    # KEY_CAP_Q = 81
+    # KEY_CAP_R = 82
+    # KEY_CAP_S = 83
+    # KEY_CAP_T = 84
+    # KEY_CAP_U = 85
+    # KEY_CAP_V = 86
+    # KEY_CAP_W = 87
+    # KEY_CAP_X = 88
+    # KEY_CAP_Y = 89
+    # KEY_CAP_Z = 90
+    # KEY_LBRACKET = 91
+    # KEY_BACKSLASH = 92
+    # KEY_RBRACKET = 93
+    # KEY_CAROT = 94
+    # KEY_UNDER = 95
+    # KEY_BACKTICK = 96
+    # KEY_A = 97
+    # KEY_B = 98
+    # KEY_C = 99
+    # KEY_D = 100
+    # KEY_E = 101
+    # KEY_F = 102
+    # KEY_G = 103
+    # KEY_H = 104
+    # KEY_I = 105
+    # KEY_J = 106
+    # KEY_K = 107
+    # KEY_L = 108
+    # KEY_M = 109
+    # KEY_N = 110
+    # KEY_O = 111
+    # KEY_P = 112
+    # KEY_Q = 113
+    # KEY_R = 114
+    # KEY_S = 115
+    # KEY_T = 116
+    # KEY_U = 117
+    # KEY_V = 118
+    # KEY_W = 119
+    # KEY_X = 120
+    # KEY_Y = 121
+    # KEY_Z = 122
+    # KEY_LBRACE = 123
+    # KEY_PIPE = 124
+    # KEY_RBRACE = 125
+    # KEY_TILDE = 126
 KEY_CTRL_DC = 520
 KEY_CTRL_HOME = 536
 KEY_CTRL_END = 531
@@ -486,7 +490,7 @@ class CSS:
             offset += i or 1
             if offset + 1 >= len(self.css_text):
                 break
-        error(tokens)
+        logging.debug('%s', tokens)
         #
         class SM:
             def __init__(sm_self):
@@ -497,8 +501,8 @@ class CSS:
                 while sm_self.offset < len(tokens):
                     sm_self.work()
                 if sm_self._tags:
-                    error('tags', sm_self._tags)
-                    error('values', sm_self._values)
+                    logger.debug('tags: %r', sm_self._tags)
+                    logger.debug('values: %r', sm_self._values)
                     raise ValueError('incomplete definition for %r' % ' '.join(sm_self._tags))
             def get_tags(sm_self):
                 candidate = tokens[sm_self.offset]
@@ -526,10 +530,10 @@ class CSS:
                             raise ValueError('unknown type for %r' % t)
 
                         entry = dest.setdefault(t, CSSEntry())
-                        error('t:', t)
-                        error('entry:', entry)
+                        logger.debug('t: %r', t)
+                        logger.debug('entry: %r', entry)
                         for setting, value in sm_self._values.items():
-                            error('%r = %r' % (setting, value))
+                            logger.debug('%r = %r', setting, value)
                             entry[setting] = value
 
                     sm_self.work = sm_self.get_tags
@@ -650,7 +654,6 @@ class Queue:
                     sched.ready.append(w)
 
     def get(self, block=True):
-        # error('%d: Queue.get()' % thread_ident())
         if from_coroutine():
             return self.get_async()
         else:
@@ -658,23 +661,19 @@ class Queue:
 
     async def get_async(self):
         while "trying to return an item":
-            # error('%d: Queue.get_async() while [%d items]' % (thread_ident(), len(self.items)))
             if not self.items:
                 if self._closed:
                     raise QueueClosed()
                 self.waiting.append(sched.current)
                 sched.current = None
                 await switch()
-            # error('%d: Queue.get_async() acquiring mutex' % thread_ident())
             with self.mutex:
-                # error('%d: Queue.get_async() mutex acquired' % thread_ident())
                 try:
                     return self.items.popleft()
                 except IndexError:
                     pass
 
     def get_noblock(self, block):
-        # error('%d: Queue.noblock()' % thread_ident())
         with self.mutex:
             if self.items:
                 return self.items.popleft(), None
@@ -686,14 +685,11 @@ class Queue:
                 return None, fut
 
     def get_sync(self, block):
-        # error('%d: Queue.get_sync()' % thread_ident())
         item, fut = self.get_noblock(block)
         if fut:
             if main_thread() is current_thread():
                 raise Exception("synchronous 'get' on main thread would block event loop")
-            # error('%d: Queue.get_sync() waiting for future' % thread_ident())
             item = fut.result()
-            # error('%d: Queue.get_sync() future received' % thread_ident())
         return item
 
     def join(self):
@@ -717,7 +713,6 @@ class Queue:
                     sched.ready.append(w)
 
     def put(self, item):
-        # error('%d: Queue.put(%r)' % (thread_ident(), item))
         if from_coroutine():
             result = self.put_async(item)
         else:
@@ -725,11 +720,9 @@ class Queue:
         return result
 
     async def put_async(self, item):
-        # error('%d: Queue.put_async()' % thread_ident())
         self._put(item)
 
     def put_sync(self, item):
-        # error('%d: Queue.put_sync()' % thread_ident())
         self._put(item)
 
     def task_done(self):
@@ -769,42 +762,33 @@ class Scheduler:
         self.state = 'stopped'
 
     def call_cleanup(self, func, *args, **kwds):
-        # error('sched.call_cleanup', func, args, kwds)
         if func is None:
             raise Exception('func cannot be None')
         todo = Todo(func, *args, **kwds)
-        # error('calling at cleanup: %r' % todo)
         self._cleanup.append(todo)
 
     def call_every(self, every, func, *args, **kwds):
-        # error('sched.call_every', func)
         if func is None:
             raise Exception('func cannot be None')
         todo = Todo(func, *args, **kwds)
         self.every[todo] = every
-        # error('calling every %ss: %r' % (every, todo))
         self.ready.append(todo)
 
     def call_later(self, delay, func, *args, **kwds):
-        # error('sched.call_later', delay, func)
         if func is None:
             raise Exception('func cannot be None')
         self.sequence += 1
         deadline = time.time() + delay
         todo = Todo(func, *args, **kwds)
-        # error('calling in %d seconds: %r' % (delay, todo))
         heapq.heappush(self.sleeping, (deadline, self.sequence, todo))
 
     def call_soon(self, func, *args, **kwds):
-        # error('sched.call_soon', func)
         if func is None:
             raise Exception('func cannot be None')
         todo = Todo(func, *args, **kwds)
-        # error('calling soon: %r' % todo)
         self.ready.append(todo)
 
     def call_once(self, within, func, *args, **kwds):
-        # error('sched.call_once', within, func)
         if func is None:
             raise Exception('func cannot be None')
         for todo in self.once:
@@ -813,11 +797,9 @@ class Scheduler:
         self.sequence += 1
         deadline = time.time() + within
         todo = Todo(func, *args, **kwds)
-        # error('calling within %d seconds: %r' % (within, todo))
         heapq.heappush(self.once, (deadline, self.sequence, todo))
 
     def new_task(self, coro, *args, label=None, **kwds):
-        # error('sched.new_task', label or coro)
         if isinstance(coro, Coroutine):
             if args or kwds:
                 raise ValueError('cannot provide arguments when coro is already instanciated [%r, %r, %r]'
@@ -827,24 +809,20 @@ class Scheduler:
             self.ready.append(Task(coro(*args, **kwds), label=label))
 
     def new_thread(self, func, *args, label=None, daemon=False, **kwds):
-        # error('sched.new_thread', func, label)
         t = Thread(target=func, name=label, daemon=daemon, args=args, kwargs=kwds)
         self._threads.append(t)
         if self.state == 'running':
             t.start()
 
     def notify(self, c_id, msg):
-        # error('sched.notify', c_id, msg)
         task = self.waiting[c_id]
         task.input = msg
         self.ready.append(task)
 
     async def readable(self, fileno):
-        # error('sched.readable', fileno)
         self._read_waiting[fileno] = sched.current
         sched.current = None
         await switch()
-        # error('%d now readable' % fileno)
 
     def run(self):
         self.state = 'running'
@@ -890,22 +868,17 @@ class Scheduler:
             while self.ready:
                 func = self.ready.popleft()
                 self.current = func
-                error('running', func)
                 if not isinstance(func, (Task, Todo)):
                     raise TypeError('invalid type for func: %r' % type(func))
                 func()
                 self.current = None
                 if func in self.every:
                     self.call_later(self.every[func], func)
-            # error('end of run loop state:', self.state)
-        # error('threads:', self._threads)
         self.state = 'stopped'
         for c in self._cleanup:
             c()
-        # print('scheduler finished')
 
     async def sleep(self, delay):
-        # error('sched.sleep', delay)
         deadline = time.time() + delay
         self.sequence += 1
         heapq.heappush(self.sleeping, (deadline, self.sequence, self.current))
@@ -913,24 +886,18 @@ class Scheduler:
         await switch()
 
     async def wait_notify(self, c_id):
-        # error('sched.wait_notify', c_id)
         self.waiting[c_id] = self.current
         self.current = None
-        # error('calling switch()')
         return await switch()
-        # error('wait_notify received %r' % (result, ))
         return result
 
     def wait_read(self, fileno, func):
-        # error('sched.wait_read', fileno, func)
         self._read_waiting[fileno] = func
     
     def wait_write(self, fileno, func):
-        # error('sched.wait_write', fileno, func)
         self._write_waiting[file_no] = func
 
     async def writeable(self, fileno):
-        # error('sched.writable', fileno)
         self._write_waiting[file_no] = sched.current
         sched.current = None
         await switch()
@@ -966,14 +933,11 @@ class Signal:
     def notify(self, event=None, sender=None):
         results = []
         for receiver in self.receivers:
-            error('calling', receiver)
             if event is not None:
                 res = receiver(event)
             else:
                 res = receiver()
-            error('notify received %r' % res)
             if isinstance(res, Coroutine):
-                error('scheduling returned coro')
                 sched.new_task(res)
 
     def disconnect(self, subscriber):
@@ -995,7 +959,6 @@ class Task:
     def __call__(self):
         try:
             sched.current = self
-            # error('sending %r into %s' % (self.input, self.label))
             self.coro.send(self.input)
             self.input = None
             if sched.current:
@@ -1081,7 +1044,6 @@ class Widget:
         """
         If size is 0, 0 it will be calculated later.
         """
-        # error(self.__class__.__name__, 'Widget.__init__')
         if title is not None:
             self.title = title
         if border is not None:
@@ -1260,7 +1222,6 @@ class Widget:
         By default, the character position and attributes are the
         current settings for the window object.
         """
-        # error(self.__class__.__name__, 'Widget.add_string', y, x, string)
         attr = distill(attr)
         wy, wx, _, _ = self.get_wyxd(origin)
         try:
@@ -1317,9 +1278,7 @@ class Widget:
         self.window.noutrefresh()
 
     def blur(self):
-        # error(self.__class__.__name__, 'Widget.blur')
         if self.modal:
-            # error('    nope')
             return
         curses.curs_set(0)
         if sched.focus is self:
@@ -1349,7 +1308,6 @@ class Widget:
         strings.  A 0 value for any parameter will cause the default character to be
         used for that parameter.
         """
-        error(self.__class__.__name__, 'Widget.border')
         attr = distill(attr)
         if type is SPACE:
             ls = rs = ts = bs = tl = tr = bl = br = ' '
@@ -1395,7 +1353,6 @@ class Widget:
         y, x = origin in parent space
         height, width = available space in parent space
         """
-        error(self.__class__.__name__, 'Widget.build')
         if not _skip_self:
             # first attempt
             hy, hx = self.parent.clear_horizontal
@@ -1417,8 +1374,6 @@ class Widget:
                 rw = aw
             else:
                 rw += self._dfx
-            error('1 - orient: %s   y,x: %r   hy,hx: %r   vy,vx: %r   h,w: %r   ah,aw: %r' % (self.parent.orient, (y,x), (hy,hx), (vy,vx), (h,w), (ah,aw)))
-            error('    size: %s' % ((rh, rw), ))
             if self.inner_size == (0, 0) or self.layout is None:
                 try:
                     self._calc_best_fit(min(rh, ah), min(rw, aw))
@@ -1426,7 +1381,6 @@ class Widget:
                     ah = aw = 0
             bh, bw = self.outer_size                        # aka border size
             if bh > ah or bw > aw or ah < 1 or aw < 1:
-                error('** second attempt')
                 # second attempt
                 if self.parent.orient is HORIZONTAL:
                     build = VERTICAL
@@ -1468,51 +1422,38 @@ class Widget:
             else:  # VERTICAL
                 hx = max(hx, x+bw)
                 vy += bh
-            error('2 - orient: %s   y,x: %r   hy,hx: %r   vy,vx: %r' % (self.parent.orient, (y,x), (hy,hx), (vy,vx)))
             self.parent.clear_horizontal = hy, hx
             self.parent.clear_vertical = vy, vx
         # frame built, now build contained widgets
-        # error('self:', self)
         self._built = True
         for widget in self._contained:
             if widget.visible:
-                error('building', widget)
                 widget.build()
 
     def _calc_best_fit(self, height, width):
         # height/width is either the maximum available space, or
         # the minimum wanted by the widget
-        error('_calc_best_fit', height, width)
         h = height - self._dfy
         w = width - self._dfx
         if height < 1 or width < 1:
             raise InsufficientSpace('%r will not fit in %r' % (self.title, self.parent.title))
         layouts = self.layouts or [None]
         sizes = self.sizes
-        error('layouts:', layouts)
-        error('sizes:', sizes)
         if not sizes:
             ir, ih = self.inner_size
             if ir == 0:
                 ir = h
             if ih == 0:
                 ih = w
-            # if ir-self._dfy > 0 and ih-self._dfx > 0:
             sizes = [(ir, ih)]
-            error('sizes:', sizes)
-            # else:
-            #     raise InsufficientSpace('%r will not fit in %r' % (self.title, self.parent.title))
         if self.orient is HORIZONTAL:
             layouts = list(layouts)
             sizes = list(sizes)
         else:   # assume VERTICAL
             layouts = reversed(layouts)
             sizes = reversed(sizes)
-        error('available:', h, w)
         for l, s in zip(layouts, sizes):
-            error('  checking', s)
             if 0 < s[0] <= h and 0 < s[1] <= w:
-                error('    accepted')
                 self.inner_size = s
                 self.layout = l
                 return
@@ -1530,7 +1471,6 @@ class Widget:
           num   Number of cells to update.
           attr  Attributes for the character.
         """
-        # error('changing attrs with %r on window %r' % (args, ctrl_window))
         if ctrl_window is None:
             ctrl_window = self.window
         ctrl_window.chgat(*args)
@@ -1541,13 +1481,11 @@ class Widget:
         Like erase(), but also cause the whole window to be repainted upon next call
         to refresh().
         """
-        # error(self.__class__.__name__, 'Widget.clear')
         if self is main_frame:
             stdscr.clear()
         else:
             y, x = self.origin
             h, w = self.outer_size
-            # error('clear:', y, x, '   ', h, w)
             for y in range(y, y+h):
                 stdscr.addstr(y, x, ' '*w)
 
@@ -1597,7 +1535,6 @@ class Widget:
         self.window.noutrefresh()
 
     def dismiss(self, cascade=True):
-        # error(self.__class__.__name__, 'Widget.dismiss')
         if sched.focus is self:
             sched.focus = None
         for w in self._contained:
@@ -1607,11 +1544,8 @@ class Widget:
         self.window = None
         self.border_window = None
         if cascade:
-            # error('%r._contained =' % self.parent.__class__.__name__, self.parent._contained)
             if self in self.parent._contained:
-                # error('removing %r from %r' % (self, self.parent._contained))
                 self.parent._contained.remove(self)
-            # error(self.parent, 'is refreshing')
             self.parent.paint()
             self.parent.refresh()
 
@@ -1636,8 +1570,6 @@ class Widget:
           y     line number.
           x     column number.
         """
-        # error(self.__class__.__name__, 'Widget.encloses')
-        # error(self, args)
         if len(args) == 1:
             event = args[0]
             y, x = event.y, event.x
@@ -1654,7 +1586,6 @@ class Widget:
 
     def focus(self, extra=None):
         # make sure currently focused widget is not modal
-        error(self.__class__.__name__, 'Widget.focus')
         if sched.focus and sched.focus is not self:
             if sched.focus.modal:
                 if not self.is_ancestor(sched.focus):
@@ -1674,7 +1605,6 @@ class Widget:
         """
         Return absolute window origin
         """
-        # error(self.__class__.__name__, 'Widget.get_beginning_yx')
         return self.window.getbegyx()
 
     def get_bkgd(self):
@@ -1723,14 +1653,12 @@ class Widget:
         """
         Return width and height of window.
         """
-        # error(self.__class__.__name__, 'Widget.get_max_yx')
         return self.window.getmaxyx()
 
     def get_parent_yx(self):
         """
         Return origin of window relative to parent.
         """
-        # error(self.__class__.__name__, 'Widget.get_parent_yx')
         return self.border_window.getparyx()
 
     def get_string(self):
@@ -1783,11 +1711,7 @@ class Widget:
         """
         Remove from parent.
         """
-        # error(self.__class__.__name__, 'Widget.hide')
         self._built = False
-        # self.window = None
-        # self.border_window = None
-        # self.parent.window.noutrefresh()
 
     def hline(self, y, x, n, ch=None, attr=A_NORMAL, origin='window'):
         """
@@ -1947,10 +1871,8 @@ class Widget:
         self.window.noutrefresh()
 
     def is_ancestor(self, widget):
-        # error(self.__class__.__name__, 'Widget.is_ancestor', widget)
         p = self.parent
         while isinstance(p, Widget):
-            # error('  checking', p)
             if p is widget:
                 return True
             p = p.parent
@@ -2067,21 +1989,18 @@ class Widget:
         window, but does not force an update of the physical screen.  To accomplish
         that, call doupdate().
         """
-        # error(self.__class__.__name__, 'Widget.no_update_refresh')
         stdscr.noutrefresh()
 
     def paint(self, attr=A_NORMAL, cascade=True):
         """
         Paint self and all contained widgets.
         """
-        error(self.__class__.__name__, 'Widget.paint')
         if not self.visible or not self._built:
             return False
         attr = distill(attr)
         self.clear()
         if self.border_style:
             self.border(self.border_style, attr=attr)
-        # error('%s._contained:' % self.__class__.__name__, self._contained)
         if cascade:
             for widget in self._contained:
                 if widget.visible:
@@ -2127,7 +2046,6 @@ class Widget:
 
         return False if not handled
         """
-        # error(self.__class__.__name__, 'Widget.process_key')
         return False
 
     def process_mouse(self, clicked_widget, event):
@@ -2136,7 +2054,6 @@ class Widget:
 
         return False if not handled
         """
-        # error(self.__class__.__name__, 'Widget.process_mouse')
         return False
 
     def redraw_line(self, beg, num):
@@ -2163,7 +2080,6 @@ class Widget:
 
         Synchronize actual screen with previous drawing/deleting methods.
         """
-        # error(self.__class__.__name__, 'Widget.refresh')
         stdscr.refresh()
 
     def resize(self, lines, cols):
@@ -2296,7 +2212,6 @@ class Frame(Widget):
     modal = False
 
     def __init__(self, *args, modal=None, **kwds):
-        # error(self.__class__.__name__, 'Frame.__init__')
         super().__init__(*args, **kwds)
         if modal is not None:
             self.modal = modal
@@ -2307,7 +2222,6 @@ class Frame(Widget):
         """
         Include widget in size calculation.
         """
-        # error(self.__class__.__name__, 'Frame.add_widget')
         if isinstance(widget, type):
             widget = widget()
         if widget.parent is None:
@@ -2326,7 +2240,6 @@ class MainFrame(Frame):
     # status_win = None
 
     def __init__(self, status=None, **kwds):
-        # error(self.__class__.__name__, 'MainFrame.__init__')
         global main_frame, stdscr
         if stdscr is not None:
             raise RuntimeError('can only call MainFrame once')
@@ -2374,13 +2287,11 @@ class MainFrame(Frame):
         curses.endwin()
 
     def build(self):
-        # error(self.__class__.__name__, 'MainFrame.build')
         height, width = self.inner_size
         self.origin = 0, 0
         super().build(_skip_self=True)
 
     def paint(self, attr=A_NORMAL, cascade=True):
-        # error(self.__class__.__name__, 'MainFrame.paint')
         super().paint(attr=attr, cascade=cascade)
         self.refresh()
 
@@ -2394,8 +2305,6 @@ class Label(Widget):
     line(s) of text to describe another widget
     """
     def __init__(self, text, *args, **kwds):
-        # error(self.__class__.__name__, 'Label.__init__')
-        # error('Label(%r, *%r, **%r)' % (text, args, kwds))
         super().__init__(*args, **kwds)
         self._value = lines = text.split('\n')
         width = max([len(l) for l in lines])
@@ -2405,8 +2314,6 @@ class Label(Widget):
         """
         paint the Label text in the parent window starting at line, col
         """
-        error(self.__class__.__name__, 'Label.paint', self.origin)
-        # p = self.parent
         for i, line in enumerate(self.value):
             self.add_string(i, 0, line, attr)
         self.no_update_refresh()
@@ -2495,8 +2402,6 @@ class TextBox(Frame):
         self._value = lines
 
     def focus(self, extra=None):
-        # window.getyx(), window.move()
-        error('%r.focus()' % self, self.cursor)
         super().focus(extra='<%s>' % self._cursor_state)
         self.move_cursor(*self.cursor)
         assert self._cursor == self.get_cursor(), '%r != %r' % (self.cursor, self.get_cursor())
@@ -2603,17 +2508,14 @@ class TextBox(Frame):
         return 0, 0
 
     def paint(self, attr=A_NORMAL, cascade=True):
-        # error(self.__class__.__name__, 'TextBox.paint')
         super().paint(attr=attr, cascade=cascade)
         for i, line in enumerate(self._value):
             self.add_string(i, 0, line, attr)
 
     def process_key(self, event):
-        error(self.__class__.__name__, 'TextBox.process_key: %r' % event)
         cy, cx = self.cursor
         h, w = self.inner_size
         if event.key is KEY_CTRL_U:
-            error('updating self.value')
             self.value = self.value
             self.paint()
         elif event.key in (
@@ -2673,15 +2575,10 @@ class TextBox(Frame):
                         cx = 0
                         self.cursor = cy, cx
                 elif event.key != ' ' and self.in_string(cy, cx, 1) == ' ':
-                    error('do something!')
                     offset = w - cx - 2
-                    error('  offset:', offset, '  cy, cx, and h', cy, cx, h)
                     if cy < h - 1:
                         self.cursor = self._word_end(cy+1, 0)
                         self.paint()
-                        error('cursor:', self.cursor)
-                        error(repr(self._value[0]))
-                        error(repr(self._value[1]))
                         for _ in range(offset):
                             self._move_cursor(KEY_LEFT)
                         self.paint()
@@ -2689,7 +2586,6 @@ class TextBox(Frame):
                     self._move_cursor(KEY_RIGHT)
                 self.paint()
         else:
-            error(event, 'not handled [%r]' % type(event.key))
             return False # not handled
         return True
 
@@ -2701,20 +2597,16 @@ class Button(Widget):
     _focusable = True
 
     def __init__(self, text, *args, on_click, **kwds):
-        # error(self.__class__.__name__, 'Button.__init__')
-        # error('Button(%r, %r, *%r, **%r)' % (text, on_click, args, kwds))
         super().__init__(*args, **kwds)
         self.value = text
         self.on_click = on_click
         self.inner_size = 1, len(text) + 4
 
     def _activate(self):
-        # error('on-click =', self.on_click)
         self.focus()
         if isinstance(self.on_click, KeyEvent):
             return self.on_click
         elif isinstance(self.on_click, Signal):
-            # error('scheduling', self.on_click.notify)
             sched.call_soon(self.on_click.notify)
         else:
             # better be a Task or Todo!
@@ -2722,20 +2614,16 @@ class Button(Widget):
         return True
 
     def paint(self, attr=A_NORMAL, cascade=True):
-        # error(self.__class__.__name__, 'Button.paint')
         super().paint(attr=attr, cascade=cascade)
         self.add_string(0, 0, ' [%s]' % self.value, attr)
         self.no_update_refresh()
 
     def process_key(self, event):
-        # error(self.__class__.__name__, 'Button.process_key')
-        # error(self.__class__.__name__, 'is processing', event)
         if event.key in (' ',KEY_RETURN):
             return self._activate()
         return False
 
     def process_mouse(self, clicked_widget, event):
-        # error(self.__class__.__name__, 'Button.process_mouse')
         return self._activate()
 
 
@@ -2753,7 +2641,6 @@ class CheckBoxes(Frame):
     selection_template = '_ %s', 'X %s'
 
     def __init__(self, *args, choices=None, **kwds):
-        error(self.__class__.__name__, 'CheckBoxes.__init__')
         super().__init__(*args, **kwds)
         if choices is not None:
             self.choices = choices
@@ -2780,8 +2667,6 @@ class CheckBoxes(Frame):
             beginning.pop()
         self.layouts = beginning + ending
         self.sizes = [(j, k*cell_width) for j, k in self.layouts]
-        error('  sizes:', self.sizes)
-        error('  layouts:', self.layouts)
 
     @property
     def value(self):
@@ -2795,14 +2680,12 @@ class CheckBoxes(Frame):
             self._value.append(choice)
 
     def blur(self):
-        # error(self.__class__.__name__, 'CheckBoxes.blur')
         super().blur()
         self.current, self._last = None, self.current
         self.paint(cascade=False)
         return self
 
     def focus(self, extra=None):
-        error(self.__class__.__name__, 'CheckBoxes.focus')
         if self.current is None:
             if self._last is not None:
                 self.current = self._last
@@ -2815,18 +2698,14 @@ class CheckBoxes(Frame):
                 except IndexError:
                     pass
             self.paint(cascade=False)
-        error('CB.focus() has self.current as %r' % self.current)
         return super().focus(extra=extra)
 
     def paint(self, attr=A_NORMAL, cascade=True):
-        # error(self.__class__.__name__, 'CheckBoxes.paint')
         super().paint(attr=attr, cascade=cascade)
         layout = (self.vertical, self.horizontal)[self.orient is HORIZONTAL]
         rows, cols = self.layout
         layout = layout(rows, cols, self.cell_width)
-        # error('  self.current:', repr(self.current))
         for c in self.choices:
-            # error('  c = %r' % c)
             current = c == self.current
             selected = c in self.value
             y, x = next(layout)
@@ -2841,15 +2720,12 @@ class CheckBoxes(Frame):
         stdscr.noutrefresh()
 
     def process_key(self, event):
-        # error(self.__class__.__name__, 'CheckBoxes.process_key')
-        # error(self.__class__.__name__, 'is processing', event)
         c = self.current
         w = self.cell_width
         opts = self._grid
         y, x = opts[c]
         if event.key == ' ':
             self.value = self.current
-            # error(self.value)
             sched.call_soon(Signal(self.__class__.__name__).notify, MessageEvent(selected=self.value))
         elif event.key is KEY_RIGHT:
             if (y, x+w) in opts:
@@ -2876,12 +2752,9 @@ class CheckBoxes(Frame):
             else:
                 c = opts[0, x]
         else:
-            # error(event, 'not handled')
             return False # not handled
         self.current = c
-        # error('self.current is now %r' % c)
         self.paint()
-        # error('handled')
         return True
 
 
@@ -2932,7 +2805,6 @@ class ProgramStatus(Frame):
     modal = True
 
     def __init__(self, message, *args, button='Ok', show_button=True, **kwds):
-        # error(self.__class__.__name__, 'ProgramStatus.__init__')
         super().__init__(*args, **kwds)
         p = kwds.get('parent', main_frame)
         p.add_widget(self)
@@ -2942,13 +2814,11 @@ class ProgramStatus(Frame):
         w, h = self.parent.inner_size
         self.build()
         self.prev_focus = sched.focus.blur()
-        # error('saved %r as prev_focus' % self.prev_focus)
         self.focus()
         self.paint()
         self.refresh()
 
     def build(self):
-        # error(self.__class__.__name__, 'ProgramStatus.build')
         l, c = self.outer_size
         h, w = self.parent.outer_size
         y = (h-l) // 2
@@ -2958,13 +2828,10 @@ class ProgramStatus(Frame):
         super().build(_skip_self=True)
 
     def dismiss(self):
-        error('ProgramStatus.dismiss')
         super().dismiss()
         sched.focus = self.prev_focus.focus()
-        error('focus returned to', sched.focus)
 
     def show_button(self):
-        # error(self.__class__.__name__, 'ProgramStatus.show_button')
         self.button.visible = True
         self.button.build()
         self.button.focus()
@@ -2979,8 +2846,6 @@ class QueryUser(Frame):
     modal = True
 
     def __init__(self, question, *args, yes='Yes', no='No', **kwds):
-        # error(self.__class__.__name__, 'QueryUser.__init__')
-        # error('QueryUser(%r, %r, %r, *%r, **%r)' % (question, yes, no, args, kwds))
         super().__init__(*args, **kwds)
         self.question = q = Label(question)
         self.yes = y = Button(yes, on_click=KeyEvent('Y'))
@@ -2998,12 +2863,9 @@ class QueryUser(Frame):
         self.add_widget(q)
         self.add_widget(y)
         self.add_widget(n)
-        # error('  QueryUser init()ed')
 
     def __call__(self):
-        error('QueryUser current focus', sched.focus)
         self.prev_focus = sched.focus.blur()
-        error('saved %r as prev_focus' % self.prev_focus)
         lines, cols = self.parent.inner_size
         self.build()
         self.focus()
@@ -3011,7 +2873,6 @@ class QueryUser(Frame):
         self.refresh()
 
     def build(self):
-        # error(self.__class__.__name__, 'QueryUser.build')
         if self.inner_size == (0, 0):
             self._calc_best_fit(*self.parent.inner_size)
         if self.orient == HORIZONTAL:
@@ -3028,7 +2889,6 @@ class QueryUser(Frame):
         super().build(_skip_self=True)
 
     def process_key(self, event):
-        # error(self.__class__.__name__, 'QueryUser.process_key')
         key = event.key
         if key is KEY_ESC:
             key = 'N'
@@ -3044,7 +2904,6 @@ class QueryUser(Frame):
             elif key in 'nN':
                 self.dismiss()
                 sched.focus = self.prev_focus.focus()
-                error('focus returned to', sched.focus)
                 sched.focus.refresh()
                 return True
         return False
@@ -3057,7 +2916,6 @@ class StatusLine(Frame):
     last_event = None
 
     def build(self, *args, **kwds):
-        # error(self.__class__.__name__, 'StatusLine.build')
         pass
 
     def on_event(self, msg):
@@ -3065,7 +2923,6 @@ class StatusLine(Frame):
         self.paint()
 
     def paint(self, attr=A_NORMAL, cascade=True):
-        # error(self.__class__.__name__, 'StatusLine.paint')
         current_cursor = stdscr.getyx()
         height, width = self.inner_size
         self.hline(0, 0, width)
@@ -3093,19 +2950,18 @@ class App:
     layout = ()
 
     def __init__(self):
-        # error(self.__class__.__name__, 'App.__init__')
         self.main = main = MainFrame(border=self.border_style, status=self.status, title=self.title, parent=self)
         for name in dir(self):
             if name.startswith('on_'):
                 signal_name = ''.join(n.title() for n in name.split('_')[1:])
-                # error('connecting signal %r to %r' % (signal_name, getattr(self, name)))
+                logger.debug('connecting signal %r to %r', signal_name, getattr(self, name))
                 Signal(signal_name).connect(getattr(self, name))
         for widget in self.layout:
             widget = main.add_widget(widget)
             for name in dir(widget):
                 if name.startswith('on_'):
                     signal_name = ''.join(n.title() for n in name.split('_')[1:])
-                    # error('connecting signal %r to %r' % (signal_name, getattr(widget, name)))
+                    logger.debug('connecting signal %r to %r', signal_name, getattr(widget, name))
                     Signal(signal_name).connect(getattr(widget, name))
 
 
@@ -3138,12 +2994,9 @@ class App:
         return path
 
     def paint(self, attr=A_NORMAL, cascade=True):
-        # error(self.__class__.__name__, 'App.paint')
         self.main.paint(attr=attr, cascade=cascade)
 
     def process_key(self, event):
-        # error(self.__class__.__name__, 'App.process_key')
-        # error(self.__class__.__name__, 'is processing', event)
         if event.key in on_key.quick_keys:
             sched.call_soon(on_key.quick_keys[event.key], self)
         elif event.key is KEY_CTRL_Q:
@@ -3152,19 +3005,14 @@ class App:
             sched.state = 'user-quit'
         elif event.key is KEY_TAB:
             # focus next field/button/whatever
-            error('MyApp: moving focus forward')
             sched.focus.next()
         elif event.key is KEY_BTAB:
             # or previous field/button/whatever
-            error('MyApp: moving focus backward')
             sched.focus.prev()
         return True
 
     def process_mouse(self, clicked_widget, event):
         # widget = smallest widget that contains mouse event
-        # error(self.__class__.__name__, 'App.process_mouse')
-        # error('mouse click in', clicked_widget)
-        # error('focused: %r   event: %r' % (sched.focus, event))
         if not sched.focus.encloses(event):
             # switch focus
             clicked_widget.focus()
@@ -3175,15 +3023,11 @@ class App:
         def find_clicked_widget(widget, fail=False):
             # find smallest widget that contains mouse event
             w = widget
-            # error('initial widgit:', w)
             contained = w._contained[:]
-            # error('initial contained:', contained)
             while contained:
                 w = contained.pop(0)
-                # error('checking', w, event)
                 if w.encloses(event):
                     contained = getattr(w, '_contained', [])[:]
-                    # error('narrowing search to:', contained)
                     if not contained:
                         return w
             else:
@@ -3215,7 +3059,6 @@ class App:
                 if isinstance(event, MouseEvent):
                     w = clicked_widget = find_clicked_widget(sched.focus)
                     while w:
-                        # error('calling %s.process_mouse()' % w)
                         res = w.process_mouse(clicked_widget, event)
                         if res is None:
                             raise ValueError('%s.process_mouse() returned None' % w)
@@ -3227,7 +3070,6 @@ class App:
                         w = w.parent
                 if isinstance(event, KeyEvent):
                     while w:
-                        # error('calling %s.process_key()' % w)
                         res = w.process_key(event)
                         if res is None:
                             raise ValueError('%s.process_key() returned None' % w)
@@ -3246,7 +3088,6 @@ class App:
         """
         Search DOM for object with css id or css cls.
         """
-        error('DOM cache')
         if cls is None and id is None:
             raise ValueError('either class or css id must be given')
         if cls is not None and id is not None:
@@ -3260,7 +3101,6 @@ class App:
         contained = []
         i = -1
         while "searching for target":
-            error(' looking at', current, 'with css id of', getattr(current, 'css_id', '<none>'))
             if (
                 cls is not None and isinstance(current, cls)
                 or isinstance(cls, str) and current.__class__.__name__ == cls
@@ -3313,9 +3153,7 @@ class App:
         sched.focus.focus()
 
     def refresh(self):
-        error(self.__class__.__name__, 'App.refresh')
         self.main.refresh()
-        error('focusing', sched.focus)
         sched.focus.focus()
 
     def run(self):
@@ -3330,12 +3168,7 @@ class App:
                     obj = main
                 else:
                     obj = self.query_one(cls=obj)
-                # and save it on the scheduler
-                # sched.focus = obj
-                error('focusing', obj)
                 obj.focus()
-                # for w in main._contained:
-                #     error(repr(w))
                 sched.wait_read(sys.stdin.fileno(), Task(self.process_user_input(main), label='process user input'))
                 sched.run()
         except KeyboardInterrupt:
@@ -3423,7 +3256,6 @@ if __name__ == '__main__':
 
         def on_enum_button_box(self, msg):
             # msg should be string of selected Enum
-            # error(msg.selected)
             self.value = [globals()[enum_name] for enum_name in msg.selected]
             self.title = '%d enums' % len(self.value)
             self.paint()
@@ -3436,7 +3268,6 @@ if __name__ == '__main__':
             layout = self.vertical(rows, cols, 40)
             if self.value is not None:
                 for enum in self.value:
-                    # error('current enum: %r' % enum)
                     for mbr in enum:
                         try:
                             y, x = next(layout)
