@@ -271,13 +271,23 @@ class MouseEvent(Event):
     z = 'z coordinate'
     state = 'mouse state'
 
+non_alpha = ' ().,-#:;{}+*%[]'
+
 class on_key:
     quick_keys = {}
-    def __init__(self, *keystrokes):
+
+    def __init__(self, *keystrokes, limit_scope=None):
+        # limit_scope can contain css_ids where keystrokes are active
+        # default of None means keystrokes are global
         self.keys = keystrokes
+        if not isinstance(limit_scope, tuple):
+            limit_scope = (limit_scope, )
+        self.scopes = limit_scope
+
     def __call__(self, func):
         for key in self.keys:
-            self.quick_keys[key] = func
+            for scope in self.scopes:
+                self.quick_keys.setdefault(scope, {})[key] = func
         return func
 
 
@@ -1284,7 +1294,7 @@ class Widget:
         if sched.focus is self:
             sched.focus = None
         if self.border_style:
-            self.border(attr=A_NORMAL)
+            self.border(self.border_style, attr=A_NORMAL)
         else:
             self.paint(attr=A_NORMAL)
         stdscr.noutrefresh()
@@ -1311,6 +1321,8 @@ class Widget:
         attr = distill(attr)
         if type is SPACE:
             ls = rs = ts = bs = tl = tr = bl = br = ' '
+            li = '---|'
+            lo = '|---'
         elif type is SINGLE:
             ls = rs = '\u2502'
             ts = bs = '\u2500'
@@ -1318,6 +1330,8 @@ class Widget:
             tr = '\u2510'
             bl = '\u2514'
             br = '\u2518'
+            li = '\u2500\u2500\u2500\u2524'
+            lo = '\u251c\u2500\u2500\u2500'
         elif type is DOUBLE:
             ls = rs = '\u2551'
             ts = bs = '\u2550'
@@ -1325,8 +1339,12 @@ class Widget:
             tr = '\u2557'
             bl = '\u255a'
             br = '\u255d'
+            li = ''
+            lo = ''
         else:
             ls = rs = ts = bs = tl = tr = bl = br = type
+            li = '%s|' % (type*3)
+            lo = '|%s' % (type*3)
         y1, x1 = self.origin
         h,  w  = self.outer_size
         y2, x2 = y1+h-1, x1+w-1
@@ -1342,7 +1360,7 @@ class Widget:
         except curses.error:
             pass
         if self.title:
-            self.add_string(0, 1, '\u2500\u2500\u2500\u2524 %s \u251c\u2500\u2500\u2500' % self.title, origin='border', attr=attr)
+            self.add_string(0, 1, '%s %s %s' % (li, self.title, lo), origin='border', attr=attr)
         if extra is not None:
             size = len(extra)
             self.add_string(0, self.outer_size.width-size-5, extra, origin='border', attr=attr)
@@ -1436,7 +1454,7 @@ class Widget:
         h = height - self._dfy
         w = width - self._dfx
         if height < 1 or width < 1:
-            raise InsufficientSpace('%r will not fit in %r' % (self.title, self.parent.title))
+            raise InsufficientSpace('%r will not fit in %r with %r' % (self.title, self.parent.title, (height, width)))
         layouts = self.layouts or [None]
         sizes = self.sizes
         if not sizes:
@@ -1452,14 +1470,16 @@ class Widget:
         else:   # assume VERTICAL
             layouts = reversed(layouts)
             sizes = reversed(sizes)
+        logger.debug('target: %rx%r', h, w)
         for l, s in zip(layouts, sizes):
+            logger.debug('checking %r with %r', l, s)
             if 0 < s[0] <= h and 0 < s[1] <= w:
                 self.inner_size = s
                 self.layout = l
                 return
-        raise InsufficientSpace('%r will not fit in %r' % (self, self.parent))
+        raise InsufficientSpace('%r will not fit in %r with %r' % (self, self.parent, (h, w)))
 
-    def change_attr(self, *args, ctrl_window=None):
+    def change_attr(self, y, x, num=1, attr=A_NORMAL, origin='window'):
         """
         change_attr([y, x,] [num,] attr)
 
@@ -1471,10 +1491,10 @@ class Widget:
           num   Number of cells to update.
           attr  Attributes for the character.
         """
-        if ctrl_window is None:
-            ctrl_window = self.window
-        ctrl_window.chgat(*args)
-        ctrl_window.noutrefresh()
+        logger.error('changing attributes at (%r, %r) for %r bytes to %r' % (y, x, num, attr))
+        wy, wx, _, _ = self.get_wyxd(origin)
+        stdscr.chgat(y, x, num, distill(attr))
+        stdscr.noutrefresh()
 
     def clear(self, origin='window'):
         """
@@ -1484,10 +1504,9 @@ class Widget:
         if self is main_frame:
             stdscr.clear()
         else:
-            y, x = self.origin
-            h, w = self.outer_size
-            for y in range(y, y+h):
-                stdscr.addstr(y, x, ' '*w)
+            wy, wx, wh, ww = self.get_wyxd(origin)
+            for y in range(wy, wy+wh):
+                stdscr.addstr(y, wx, ' '*(ww-1))
 
     def clear_ok(self, flag):
         """
@@ -1595,7 +1614,7 @@ class Widget:
         sched.focus = self
         attr = curses.color_pair(1)|A_BOLD
         if self.border_style:
-            self.border(attr=attr, extra=extra)
+            self.border(self.border_style, attr=attr, extra=extra)
         else:
             self.paint(attr=attr)
         stdscr.refresh()
@@ -2334,7 +2353,7 @@ class TextBox(Frame):
     read_only = False
     _cursor = 0, 0
     _cursor_state = INSERT
-    _value = ()
+    _value = ''
 
     def __init__(self, *args, read_only=None, **kwds):
         super().__init__(*args, **kwds)
@@ -2460,7 +2479,7 @@ class TextBox(Frame):
 
     def _word_end(self, y=None, x=None):
         """
-        Move cursor to end of current/next word.
+        Return cursor location of end of current/next word.
         """
         if y is None:
             cy, cx = self.cursor
@@ -2470,13 +2489,13 @@ class TextBox(Frame):
         max_y, max_x = self.inner_size
         for j in range(cy, max_y):
             text = self.in_string(j, 0, max_x)
-            in_word = text[x] not in ' -,.'
+            in_word = x < max_x and text[x] not in non_alpha or False
             for i in range(x, max_x):
                 if in_word:
-                    if text[i] in ' -,.':
+                    if text[i] in non_alpha:
                         return j, i
                 else:
-                    if text[i] not in ' -,.':
+                    if text[i] not in non_alpha:
                         in_word = True
             x = 0
         return cy, cx
@@ -2484,7 +2503,7 @@ class TextBox(Frame):
 
     def _word_start(self, y=None, x=None):
         """
-        Move cursor to start of current/previous word.
+        Return cursor location of start of current/previous word.
         """
         if y is None:
             cy, cx = self.cursor
@@ -2493,16 +2512,16 @@ class TextBox(Frame):
         max_y, max_x = self.inner_size
         for j in range(cy, -1, -1):
             text = self.in_string(j, 0, max_x)
-            in_word = cx != 0 and text[cx-1] not in ' -,.'
+            in_word = cx != 0 and text[cx-1] not in non_alpha
             for i in range(cx-1, -1, -1):
                 if in_word:
-                    if text[i] in ' -,.' or i == 0:
+                    if text[i] in non_alpha or i == 0:
                         if i == 0:
                             return j, i
                         else:
                             return j, i+1
                 else:
-                    if text[i] not in ' -,.':
+                    if text[i] not in non_alpha:
                         in_word = True
             cx = max_x - 1
         return 0, 0
@@ -2923,12 +2942,26 @@ class StatusLine(Frame):
         self.paint()
 
     def paint(self, attr=A_NORMAL, cascade=True):
+        cid = sched.focus and sched.focus.css_id
+        local_keys = dict()
+        global_keys = set()
+        if cid is not None and cid in on_key.quick_keys:
+            for keystroke, function in on_key.quick_keys[cid].items():
+                local_keys[keystroke] = (function.__doc__ or '').strip()
+        for keystroke, function in on_key.quick_keys[None].items():
+            if keystroke not in local_keys:
+                global_keys.add((function.__doc__ or '').strip())
+        help_line = '  '.join([
+                '  '.join(sorted(local_keys.values())),
+                '  '.join(sorted(global_keys))
+                ]).strip()
         current_cursor = stdscr.getyx()
         height, width = self.inner_size
+        self.clear()
         self.hline(0, 0, width)
-        self.add_string(1, 0, "rows: %d,  cols:%d" % stdscr.getmaxyx(), attr)
-        self.add_string(1, 25, "color pairs: %d" % curses.COLOR_PAIRS, attr)
-        self.add_string(1, 50, "event: %-50r" % (self.last_event, ), attr)
+        self.add_string(1, 0, "rows:%d, cols:%d" % stdscr.getmaxyx(), attr)
+        self.add_string(1, 20, "%r" % self.last_event)
+        self.add_string(1, width-1-len(help_line)-15, '   Quick keys: %s' % help_line)
         stdscr.move(*current_cursor)
         stdscr.noutrefresh()
 
@@ -2997,10 +3030,11 @@ class App:
         self.main.paint(attr=attr, cascade=cascade)
 
     def process_key(self, event):
-        if event.key in on_key.quick_keys:
-            sched.call_soon(on_key.quick_keys[event.key], self)
-        elif event.key is KEY_CTRL_Q:
-            sched.call_soon(QueryUser('Exit application?', border=SINGLE, parent=self.main))
+        cid = sched.focus and sched.focus.css_id
+        if event.key in on_key.quick_keys.get(cid, ()):
+            sched.call_soon(on_key.quick_keys[cid][event.key], self)
+        elif event.key in on_key.quick_keys[None]:
+            sched.call_soon(on_key.quick_keys[None][event.key], self)
         elif event.key is KEY_CTRL_C:
             sched.state = 'user-quit'
         elif event.key is KEY_TAB:
@@ -3130,8 +3164,18 @@ class App:
                 break
         raise ValueError('unable to find %r' % (cls or id))
 
+    @on_key(KEY_CTRL_Q)
+    def quit(self):
+        """
+        ^Q=Quit
+        """
+        sched.call_soon(QueryUser('Exit application?', border=SINGLE, parent=self.main))
+
     @on_key(KEY_CTRL_R)
     def redraw(self):
+        """
+        ^R=Redraw
+        """
         widgets = self.main._contained[:]
         i = 0
         while i < len(widgets):
