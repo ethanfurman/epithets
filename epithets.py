@@ -1234,6 +1234,9 @@ class Widget:
         """
         attr = distill(attr)
         wy, wx, _, _ = self.get_wyxd(origin)
+        logger.debug(self.css_id)
+        logger.debug('origin: %r, %r', wy, wx)
+        logger.debug('adding at %r, %r: %r', wy+y, wx+x, string)
         try:
             stdscr.addstr(wy+y, wx+x, string, attr)
         except TypeError as e:
@@ -2292,10 +2295,13 @@ class MainFrame(Frame):
         self.inner_size = inner_height, inner_width
         inner_y, inner_x = self.inner_window
         if self.show_status:
-            inner_height -= 2
-            self._dfy += 2
+            inner_height -= self.show_status + 1
+            self._dfy += self.show_status + 1
             self.inner_size = inner_height, inner_width
-            status_win = self.add_widget(StatusLine(size=(2, inner_width), origin=(outer_height-3, inner_x)))
+            status_win = self.add_widget(StatusLine(
+                    size=(self.show_status+1, inner_width),
+                    origin=(outer_height-self.show_status-2, inner_x)
+                    ))
             Signal('Event').connect(status_win.on_event)
         return self
 
@@ -2386,7 +2392,6 @@ class TextBox(Frame):
             else:
                 line = '\n'
             lines.append(line)
-        self._value = lines
         return ''.join(lines).strip()
 
     @value.setter
@@ -2394,6 +2399,7 @@ class TextBox(Frame):
         """
         save value as multiple strings to fit in text box
         """
+        logger.debug(self.css_id)
         y, x, h, w = self.get_wyxd()
         incoming = new_value.strip().split('\n')
         lines = []
@@ -2418,6 +2424,7 @@ class TextBox(Frame):
         lines.extend([''] * h)
         for i in range(h):
             lines[i] = (lines[i] + ' '*w)[:w]
+            logger.debug('%d: %r', len(lines[i]), lines[i])
         self._value = lines
 
     def focus(self, extra=None):
@@ -2951,17 +2958,25 @@ class StatusLine(Frame):
         for keystroke, function in on_key.quick_keys[None].items():
             if keystroke not in local_keys:
                 global_keys.add((function.__doc__ or '').strip())
-        help_line = '  '.join([
-                '  '.join(sorted(local_keys.values())),
-                '  '.join(sorted(global_keys))
-                ]).strip()
         current_cursor = stdscr.getyx()
         height, width = self.inner_size
         self.clear()
         self.hline(0, 0, width)
-        self.add_string(1, 0, "rows:%d, cols:%d" % stdscr.getmaxyx(), attr)
-        self.add_string(1, 20, "%r" % self.last_event)
-        self.add_string(1, width-1-len(help_line)-15, '   Quick keys: %s' % help_line)
+        if self.inner_size.height == 2:
+            help_line = '  '.join([
+                    '  '.join(sorted(local_keys.values())),
+                    '  '.join(sorted(global_keys))
+                    ]).strip()
+            self.add_string(1, 0, "rows:%d, cols:%d" % stdscr.getmaxyx(), attr)
+            self.add_string(1, 20, "%r" % self.last_event)
+            self.add_string(1, width-1-len(help_line)-5, '   %s' % help_line)
+        else:
+            help_line_1 = '  '.join(sorted(local_keys.values()))
+            help_line_2 = '  '.join(sorted(global_keys))
+            self.add_string(1, 0, "rows:%d, cols:%d" % stdscr.getmaxyx(), attr)
+            self.add_string(2, 0, "%r" % self.last_event)
+            self.add_string(1, width-1-len(help_line_1)-5, '   %s' % help_line_1)
+            self.add_string(2, width-1-len(help_line_2)-5, '   %s' % help_line_2)
         stdscr.move(*current_cursor)
         stdscr.noutrefresh()
 
