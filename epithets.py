@@ -825,6 +825,7 @@ class Scheduler:
             t.start()
 
     def notify(self, c_id, msg):
+        logger.info('notifying %r with %r', c_id, msg)
         task = self.waiting[c_id]
         task.input = msg
         self.ready.append(task)
@@ -844,9 +845,10 @@ class Scheduler:
             ):
             if not self.ready:
                 if self.sleeping:
-                    deadline1, *_ = self.sleeping[0]
-                    deadline2, *_ = self.once[0]
-                    deadline = min(deadline1, deadline2)
+                    deadline, *_ = self.sleeping[0]
+                    if self.once:
+                        deadline2, *_ = self.once[0]
+                        deadline = min(deadline, deadline2)
                     timeout = deadline - time.time()
                     if timeout < 0:
                         timeout = 0
@@ -896,10 +898,10 @@ class Scheduler:
         await switch()
 
     async def wait_notify(self, c_id):
+        logger.info('waiting on %r', c_id)
         self.waiting[c_id] = self.current
         self.current = None
         return await switch()
-        return result
 
     def wait_read(self, fileno, func):
         self._read_waiting[fileno] = func
@@ -1374,10 +1376,13 @@ class Widget:
         y, x = origin in parent space
         height, width = available space in parent space
         """
+        logger.debug('building %r' % (self.title or self.css_id or self.__class__.__name__))
         if not _skip_self:
             # first attempt
             hy, hx = self.parent.clear_horizontal
             vy, vx = self.parent.clear_vertical
+            logger.debug('clear horizontal: %r', (hy, hx))
+            logger.debug('clear vertical: %r', (vy, vx))
             if self.parent.orient == HORIZONTAL:
                 build = HORIZONTAL
                 y, x = hy, hx
@@ -1401,6 +1406,7 @@ class Widget:
                 except InsufficientSpace:
                     ah = aw = 0
             bh, bw = self.outer_size                        # aka border size
+            logger.debug('fist attempt: %r, %r in %r, %r', bh, bw, ah, aw)
             if bh > ah or bw > aw or ah < 1 or aw < 1:
                 # second attempt
                 if self.parent.orient is HORIZONTAL:
@@ -1411,6 +1417,8 @@ class Widget:
                     build = HORIZONTAL
                     x = vx = hx
                     y = vy = 0
+                logger.debug('   clear horizontal: %r', (hy, hx))
+                logger.debug('   clear vertical: %r', (vy, vx))
                 ah, aw = h-y, w-x
                 rh, rw = self.inner_size                    # requested height|width
                 if rh == 0:
@@ -1424,6 +1432,7 @@ class Widget:
                 if self.inner_size == (0, 0) or self.layout is None:
                     self._calc_best_fit(min(rh, ah), min(rw, aw))
                 bh, bw = self.outer_size                        # in case _calc_best_fit changed the numbers
+                logger.debug('   second attempt: %r, %r in %r, %r', bh, bw, ah, aw)
                 if bh > ah or bw > aw or ah <= 0 or aw <= 0:
                     raise InsufficientSpace('%r will not fit in %r' % (self, self.parent))
             oy, ox = self.parent.origin
@@ -1436,7 +1445,6 @@ class Widget:
                 bh = ah
             # update size in case sticky changed it
             self.outer_size = bh, bw
-
             if build is HORIZONTAL:
                 hx += bw
                 vy = max(vy, y+bh)
@@ -1446,6 +1454,7 @@ class Widget:
             self.parent.clear_horizontal = hy, hx
             self.parent.clear_vertical = vy, vx
         # frame built, now build contained widgets
+        self.visible = True
         self._built = True
         for widget in self._contained:
             if widget.visible:
