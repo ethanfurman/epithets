@@ -640,7 +640,6 @@ class Queue:
     handle threading and async queueing
     """
     def __init__(self):
-        # print('%d: Queue.__init__()' % thread_ident())
         self.mutex = ThreadLock()
         self.stable = ThreadEvent()
         self.items = deque()
@@ -653,7 +652,6 @@ class Queue:
         return 'Queue'
 
     def close(self):
-        # print('%d: Queue.close()' % thread_ident())
         self._closed = True
         with self.mutex:
             if self.waiting and not self.items:
@@ -703,11 +701,8 @@ class Queue:
         return item
 
     def join(self):
-        # print('%d: Queue.join()' % thread_ident())
         self.close()
-        # print('%d: Queue.join() waiting' % thread_ident())
         self.stable.wait()
-        # print('queue finished')
 
     def _put(self, item):
         # do the actual work
@@ -736,16 +731,10 @@ class Queue:
         self._put(item)
 
     def task_done(self):
-        # print('%d: Queue.task_done()' % thread_ident())
-        # print('  mutex:', self.mutex)
         with self.mutex:
-            # print('  mutex acquired')
             self._finished += 1
-            # print('  submitted: %d   completed: %d' % (self._submitted, self._finished))
             if self._finished == self._submitted:
-                # print('  setting stable')
                 self.stable.set()
-        # print('  mutex released')
 
 class QueueClosed(Exception):
     pass
@@ -825,12 +814,13 @@ class Scheduler:
             t.start()
 
     def notify(self, c_id, msg):
-        logger.info('notifying %r with %r', c_id, msg)
+        logger.debug('notifying %r with %r', c_id, msg)
         task = self.waiting[c_id]
         task.input = msg
         self.ready.append(task)
 
     async def readable(self, fileno):
+        logger.debug('awaiting readable on %r', fileno)
         self._read_waiting[fileno] = sched.current
         sched.current = None
         await switch()
@@ -898,18 +888,21 @@ class Scheduler:
         await switch()
 
     async def wait_notify(self, c_id):
-        logger.info('waiting on %r', c_id)
+        logger.debug('waiting on %r', c_id)
         self.waiting[c_id] = self.current
         self.current = None
         return await switch()
 
     def wait_read(self, fileno, func):
+        logger.debug('waiting for read on %r for %r', fileno, func)
         self._read_waiting[fileno] = func
     
     def wait_write(self, fileno, func):
+        logger.debug('waiting for write on %r for %r', fileno, func)
         self._write_waiting[file_no] = func
 
     async def writeable(self, fileno):
+        logger.debug('awaiting writeable on %r', fileno)
         self._write_waiting[file_no] = sched.current
         sched.current = None
         await switch()
@@ -1060,8 +1053,6 @@ class Widget:
             self.title = title
         if border is not None:
             self.border_style = border
-        # if id is None and self.css_id is not None:
-        #     id, self.css_id = self.css_id, id
         if id is not None:
             if not id or id == '#':
                 raise ValueError('id cannot be blank')
@@ -1093,8 +1084,6 @@ class Widget:
             self.origin = origin
         if orient is not None:
             self.orient = orient
-        # elif self.orient is None:
-        #     self.orient = HORIZONTAL
         if sticky is not None:
             self.sticky = sticky
         elif self.sticky is None:
@@ -1236,9 +1225,6 @@ class Widget:
         """
         attr = distill(attr)
         wy, wx, _, _ = self.get_wyxd(origin)
-        logger.debug(self.css_id)
-        logger.debug('origin: %r, %r', wy, wx)
-        logger.debug('adding at %r, %r: %r', wy+y, wx+x, string)
         try:
             stdscr.addstr(wy+y, wx+x, string, attr)
         except TypeError as e:
@@ -1376,13 +1362,10 @@ class Widget:
         y, x = origin in parent space
         height, width = available space in parent space
         """
-        logger.debug('building %r' % (self.title or self.css_id or self.__class__.__name__))
         if not _skip_self:
             # first attempt
             hy, hx = self.parent.clear_horizontal
             vy, vx = self.parent.clear_vertical
-            logger.debug('clear horizontal: %r', (hy, hx))
-            logger.debug('clear vertical: %r', (vy, vx))
             if self.parent.orient == HORIZONTAL:
                 build = HORIZONTAL
                 y, x = hy, hx
@@ -1406,7 +1389,6 @@ class Widget:
                 except InsufficientSpace:
                     ah = aw = 0
             bh, bw = self.outer_size                        # aka border size
-            logger.debug('fist attempt: %r, %r in %r, %r', bh, bw, ah, aw)
             if bh > ah or bw > aw or ah < 1 or aw < 1:
                 # second attempt
                 if self.parent.orient is HORIZONTAL:
@@ -1417,8 +1399,6 @@ class Widget:
                     build = HORIZONTAL
                     x = vx = hx
                     y = vy = 0
-                logger.debug('   clear horizontal: %r', (hy, hx))
-                logger.debug('   clear vertical: %r', (vy, vx))
                 ah, aw = h-y, w-x
                 rh, rw = self.inner_size                    # requested height|width
                 if rh == 0:
@@ -1432,7 +1412,6 @@ class Widget:
                 if self.inner_size == (0, 0) or self.layout is None:
                     self._calc_best_fit(min(rh, ah), min(rw, aw))
                 bh, bw = self.outer_size                        # in case _calc_best_fit changed the numbers
-                logger.debug('   second attempt: %r, %r in %r, %r', bh, bw, ah, aw)
                 if bh > ah or bw > aw or ah <= 0 or aw <= 0:
                     raise InsufficientSpace('%r will not fit in %r' % (self, self.parent))
             oy, ox = self.parent.origin
@@ -1445,6 +1424,7 @@ class Widget:
                 bh = ah
             # update size in case sticky changed it
             self.outer_size = bh, bw
+            #
             if build is HORIZONTAL:
                 hx += bw
                 vy = max(vy, y+bh)
@@ -1690,7 +1670,7 @@ class Widget:
         """
         Return origin of window relative to parent.
         """
-        return self.border_window.getparyx()
+        return self.origin
 
     def get_string(self):
         """
@@ -2268,7 +2248,6 @@ class MainFrame(Frame):
     There can be only one.
     """
     _focusable = True
-    # status_win = None
 
     def __init__(self, status=None, **kwds):
         global main_frame, stdscr
@@ -2353,11 +2332,20 @@ class Label(Widget):
         self.no_update_refresh()
 
 
-class Entry(Widget):
+class Entry(Frame):
     """
     enter one line of text
     """
-    _focusable = True
+    _focusable = False
+
+    def __init__(self, label=None, **kwds):
+        super().__init__(**kwds)
+        if label is None:
+            label = self.label
+        label += ' '
+        self.label = self.add_widget(Label(label))
+        e_width = (self.inner_size.width or 32) - len(label) - 1
+        self.entry = self.add_widget(TextBox(size=(1, e_width), sticky=EW))
 
 
 class TextBox(Frame):
@@ -2382,6 +2370,9 @@ class TextBox(Frame):
 
     @cursor.setter
     def cursor(self, value):
+        rows, cols = self.inner_size
+        if value[0] >= rows or value[1] >= cols:
+            raise ValueError('cursor out of bounds: %r not in %r' % (value, (rows, cols)))
         self._cursor = value
         self.move_cursor(*value)
 
@@ -2408,40 +2399,39 @@ class TextBox(Frame):
         """
         save value as multiple strings to fit in text box
         """
-        logger.debug(self.css_id)
         y, x, h, w = self.get_wyxd()
         incoming = new_value.strip().split('\n')
         lines = []
         for temp in incoming:
+            last_line = len(lines) + 1 == h
             end = w - 2
             while temp:
-                if len(temp) < w:
+                if len(temp) < w or (last_line and len(temp) == w):
                     lines.append(temp)
                     temp = ''
                     break
-                while end >= 0:
+                while end >= 0 and not last_line:
                     if temp[end] in ' -,.':
                         lines.append(temp[:end+1])
+                        last_line = len(lines) + 1 == h
                         temp = temp[end+1:].lstrip()
                         break
                     end -= 1
                 else:
                     lines.append(temp[:w])
+                    last_line = len(lines) + 1 == h
                     temp = temp[w:].lstrip()
                 end = w - 1
             lines.append('')
+        while lines and not lines[-1].strip():
+            lines.pop()
+        if len(lines) > h:
+            raise ValueError('value too big for text box')
         lines.extend([''] * h)
+        lines = lines[:h]
         for i in range(h):
             lines[i] = (lines[i] + ' '*w)[:w]
-            logger.debug('%d: %r', len(lines[i]), lines[i])
         self._value = lines
-
-    def focus(self, extra=None):
-        super().focus(extra='<%s>' % self._cursor_state)
-        self.move_cursor(*self.cursor)
-        assert self._cursor == self.get_cursor(), '%r != %r' % (self.cursor, self.get_cursor())
-        curses.curs_set(distill(self._cursor_state))
-        return self
 
     def _line_end(self, y=None):
         """
@@ -2515,7 +2505,6 @@ class TextBox(Frame):
                         in_word = True
             x = 0
         return cy, cx
-        # return max_y-1, max_x-1
 
     def _word_start(self, y=None, x=None):
         """
@@ -2542,6 +2531,17 @@ class TextBox(Frame):
             cx = max_x - 1
         return 0, 0
 
+    def build(self, _skip_self=False, **kwds):
+        super().build(_skip_self=_skip_self, **kwds)
+        self.value = self._value
+
+    def focus(self, extra=None):
+        super().focus(extra='<%s>' % self._cursor_state)
+        self.move_cursor(*self.cursor)
+        assert self._cursor == self.get_cursor(), '%r != %r' % (self.cursor, self.get_cursor())
+        curses.curs_set(distill(self._cursor_state))
+        return self
+
     def paint(self, attr=A_NORMAL, cascade=True):
         super().paint(attr=attr, cascade=cascade)
         for i, line in enumerate(self._value):
@@ -2566,10 +2566,6 @@ class TextBox(Frame):
         elif event.key is KEY_DC:
             self.add_string(cy, cx, self.in_string(cy, cx+1, w-cx))
             self._value[cy] = self.in_string(cy, 0, w)
-            # line = self._value[cy]
-            # self._value[cy] = line[:cx] + line[cx+1:]
-            # self.value = self.value
-            # self.paint()
         elif event.key is KEY_BACKSPACE:
             if cx == 0:
                 # nothing to backspace, so switch lines if possible
@@ -2579,12 +2575,12 @@ class TextBox(Frame):
             else:
                 self.add_string(cy, cx-1, self.in_string(cy, cx, w-cx))
                 self._value[cy] = self.in_string(cy, 0, w)
-                # line = self._value[cy]
-                # self._value[cy] = line[:cx-1] + line[cx:]
                 cx -= 1
             self.cursor = cy, cx
-            # self.value = self.value
-            # self.paint()
+        elif event.key is KEY_RETURN:
+            if cy < h - 1:
+                self._move_cursor(KEY_HOME)
+                self._move_cursor(KEY_DOWN)
         elif isinstance(event.key, str):
             old_cy = cy
             if self._cursor_state is REPLACE:
@@ -2602,24 +2598,33 @@ class TextBox(Frame):
             else: # INSERT
                 # insert the character into _value, then repaint
                 lines = self._value
-                lines[cy] = line = lines[cy][:cx] + event.key + lines[cy][cx:-1]
-                self.value = ' '.join([l.strip() for l in lines])
-                self.paint()
-                if event.key == ' ' and cx >= w - 2 and cy < h - 1:
-                        cy += 1
-                        cx = 0
-                        self.cursor = cy, cx
-                elif event.key != ' ' and self.in_string(cy, cx, 1) == ' ':
-                    offset = w - cx - 2
-                    if cy < h - 1:
-                        self.cursor = self._word_end(cy+1, 0)
-                        self.paint()
-                        for _ in range(offset):
-                            self._move_cursor(KEY_LEFT)
-                        self.paint()
-                else:
-                    self._move_cursor(KEY_RIGHT)
-                self.paint()
+                line = lines[cy]
+                if len(line.strip()) < w:
+                    lines[cy] = lines[cy][:cx] + event.key + lines[cy][cx:-1]
+                    new_lines = []
+                    for line in lines:
+                        if line.strip():
+                            line = line.rstrip() + ' '
+                        else:
+                            line = '\n'
+                        new_lines.append(line)
+                        self.value = ''.join(new_lines)
+                    self.paint()
+                    if event.key == ' ' and cx >= w - 2 and cy < h - 1:
+                            cy += 1
+                            cx = 0
+                            self.cursor = cy, cx
+                    elif event.key != ' ' and self.in_string(cy, cx, 1) == ' ':
+                        offset = w - cx - 2
+                        if cy < h - 1:
+                            self.cursor = self._word_end(cy+1, 0)
+                            self.paint()
+                            for _ in range(offset):
+                                self._move_cursor(KEY_LEFT)
+                            self.paint()
+                    else:
+                        self._move_cursor(KEY_RIGHT)
+                    self.paint()
         else:
             return False # not handled
         return True
@@ -2877,7 +2882,6 @@ class QueryUser(Frame):
     """
     Ask user a question; return response.
     """
-    # _focusable = True
     modal = True
 
     def __init__(self, question, *args, yes='Yes', no='No', **kwds):
@@ -3128,6 +3132,7 @@ class App:
                         w = w.parent
                 if isinstance(event, KeyEvent):
                     while w:
+                        logger.debug('%r is processing %r', w, event)
                         res = w.process_key(event)
                         if res is None:
                             raise ValueError('%s.process_key() returned None' % w)
