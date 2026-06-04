@@ -1122,7 +1122,7 @@ class Widget:
         if not value and not id:
             return "<%s: outer=%r, pos=%r>" % ('.'.join(reversed(crumbs)), self.outer_size, self.origin)
         else:
-            value = id and str(id) or repr(value) 
+            value = id and str(id) or value and repr(value) or self.__class__.__name__
             if len(value) > 32:
                 value = value[:28] + "...'"
             return "<%s:%s: outer=%r, pos=%r>" % ('.'.join(reversed(crumbs)), value, self.outer_size, self.origin)
@@ -1280,7 +1280,7 @@ class Widget:
 
     def blur(self):
         if self.modal:
-            return
+            return self
         curses.curs_set(0)
         if sched.focus is self:
             sched.focus = None
@@ -1362,6 +1362,12 @@ class Widget:
         y, x = origin in parent space
         height, width = available space in parent space
         """
+        logger.debug(
+                '%r.build(_skip_self=%r, %s',
+                self.__class__.__name__,
+                _skip_self,
+                ', '.join('%s=%r' % (k, v) for k, v in kwds.items()),
+                )
         if not _skip_self:
             # first attempt
             hy, hx = self.parent.clear_horizontal
@@ -1383,12 +1389,14 @@ class Widget:
                 rw = aw
             else:
                 rw += self._dfx
+            logger.debug('inner_size: %r    layout: %r', self.inner_size, self.layout)
             if self.inner_size == (0, 0) or self.layout is None:
                 try:
                     self._calc_best_fit(min(rh, ah), min(rw, aw))
                 except InsufficientSpace:
                     ah = aw = 0
             bh, bw = self.outer_size                        # aka border size
+            logger.debug('outer_size: %r    ah, aw: %r', self.outer_size, (ah, aw))
             if bh > ah or bw > aw or ah < 1 or aw < 1:
                 # second attempt
                 if self.parent.orient is HORIZONTAL:
@@ -1401,6 +1409,9 @@ class Widget:
                     y = vy = 0
                 ah, aw = h-y, w-x
                 rh, rw = self.inner_size                    # requested height|width
+                logger.debug('TAKE 2')
+                logger.debug('inner_size: %r    layout: %r', self.inner_size, build)
+                logger.debug('outer_size: %r    ah, aw: %r', self.outer_size, (ah, aw))
                 if rh == 0:
                     rh = ah
                 else:
@@ -1446,7 +1457,11 @@ class Widget:
         h = height - self._dfy
         w = width - self._dfx
         if height < 1 or width < 1:
-            raise InsufficientSpace('%r will not fit in %r with %r' % (self.title, self.parent.title, (height, width)))
+            raise InsufficientSpace('%r will not fit in %r with %r' % (
+                    self.title or self.__class__.__name__,
+                    self.parent.title or self.parent.__class__.__name__,
+                    (height, width),
+                    ))
         layouts = self.layouts or [None]
         sizes = self.sizes
         if not sizes:
@@ -1469,7 +1484,11 @@ class Widget:
                 self.inner_size = s
                 self.layout = l
                 return
-        raise InsufficientSpace('%r will not fit in %r with %r' % (self, self.parent, (h, w)))
+        raise InsufficientSpace('%r will not fit in %r with %r' % (
+                self.title or self.__class__.__name__,
+                self.parent.title or self.parent.__class__.__name__,
+                (height, width),
+                ))
 
     def change_attr(self, y, x, num=1, attr=A_NORMAL, origin='window'):
         """
@@ -1498,7 +1517,7 @@ class Widget:
         else:
             wy, wx, wh, ww = self.get_wyxd(origin)
             for y in range(wy, wy+wh):
-                stdscr.addstr(y, wx, ' '*(ww-1))
+                stdscr.addstr(y, wx, ' '*ww)
 
     def clear_ok(self, flag):
         """
@@ -2633,6 +2652,7 @@ class Button(Widget):
     send a button-pressed event
     """
     _focusable = True
+    layout = HORIZONTAL
 
     def __init__(self, text, *args, on_click, **kwds):
         super().__init__(*args, **kwds)
@@ -2874,6 +2894,123 @@ class ProgramStatus(Frame):
         self.button.build()
         self.button.focus()
         self.button.refresh()
+
+
+class ProgressMeter(Frame):
+    """
+    Show progress of iterable processing with custom message.
+    """
+    border_style = DOUBLE
+
+    def __init__(self, iterable, message=None, total=None, **kwds):
+        super().__init__(**kwds)
+        self.iterator = iter(iterable)
+        self.current_count = 0
+        self.blockcount = 0
+        self.last_percent = 0
+        self.last_count = 0
+        self.last_time = time.time()
+        self.total = total
+        if self.total is None:
+            try:
+                self.total = len(iterable)
+            except TypeError:
+                get_hint = getattr(iterable, '__length_hint__', None)
+                try:
+                    self.total = get_hint(iterable)
+                except TypeError:
+                    raise ValueError('unable to get length of %r' % iterable)
+        #
+        p = kwds.get('parent', main_frame)
+        p.add_widget(self)
+        if self.inner_size == (0, 0):
+            h = 4
+            if message is not None:
+                h += 2
+            self.inner_size = h, 50
+        meter = (
+                '-------------------- % Progress ---------------- 1\n'
+                '    1    2    3    4    5    6    7    8    9    0\n'
+                '    0    0    0    0    0    0    0    0    0    0\n'
+                '                                                  '
+                + '\n' * (h-4)
+                )
+        self.label = self.add_widget(Label(meter, size=(h, 50)))
+        self.msg_fn = message
+        self.build()
+        self.prev_focus = sched.focus.blur()
+        self.paint()
+        self.focus()
+        self.refresh()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        try:
+            obj = next(self.iterator)
+        except StopIteration:
+            self.progress(self.current_count, done=True)
+            raise
+        if self.msg_fn is not None:
+            self.message = self.msg_fn(obj)
+        self.progress(self.current_count+1)
+        return obj
+
+    @property
+    def message(self):
+        if self.msg_fn is None:
+            return ''
+        else:
+            return self.label._value[5].rstrip()
+
+    @message.setter
+    def message(self, value):
+        self.label._value[5] = value
+        self.label.paint()
+        self.refresh()
+
+    def build(self):
+        l, c = self.outer_size
+        h, w = self.parent.outer_size
+        y = (h-l) // 2
+        x = (w-c) // 2
+        py, px = self.parent.origin
+        self.origin = py+y, px+x
+        super().build(_skip_self=True)
+
+    def dismiss(self):
+        super().dismiss()
+        sched.focus = self.prev_focus.focus()
+
+    def progress(self, count, done=False):
+        """
+        Calculate current percent, update views.
+        """
+        self.current_count = count
+        count = min(count, self.total)
+        if self.total == count or not self.total:
+            complete = 100
+        else:
+            complete = int(math.floor(100.0*count/self.total))
+        if complete <= self.last_percent:
+            return
+        self.last_percent = complete
+        blockcount = int(complete//2)
+        if blockcount <= self.blockcount:
+            return
+        self.label._value[3] = '*' * blockcount
+        self.label.paint()
+        self.blockcount = blockcount
+        if (complete == 100 or done):
+                self.dismiss()
+
+    def tick(self):
+        """
+        Add one to counter, possibly update view.
+        """
+        self.current_count += 1
+        self.progress(self.current_count)
 
 
 class QueryUser(Frame):
