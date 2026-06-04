@@ -1518,6 +1518,7 @@ class Widget:
             wy, wx, wh, ww = self.get_wyxd(origin)
             for y in range(wy, wy+wh):
                 stdscr.addstr(y, wx, ' '*ww)
+                # stdscr.addstr(y, wx, ' '*(ww-1))
 
     def clear_ok(self, flag):
         """
@@ -3042,8 +3043,8 @@ class QueryUser(Frame):
         self.prev_focus = sched.focus.blur()
         lines, cols = self.parent.inner_size
         self.build()
-        self.focus()
         self.paint()
+        self.focus()
         self.refresh()
 
     def build(self):
