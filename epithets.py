@@ -1936,10 +1936,8 @@ class Widget:
         """
         Move the window so its upper-left corner is at (line, col) in its parent window.
         """
-        self.window = None
-        self.border_window = None
-        h, w = self.parent.inner_size
-        self.build()
+        self.clear('frame')
+        self.origin = y, x
         self.no_update_refresh()
 
     def next(self):
