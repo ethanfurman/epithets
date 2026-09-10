@@ -21,6 +21,8 @@ import time
 
 ## globals
 
+__version__ = 0, 0, 1
+
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
@@ -637,7 +639,7 @@ class Pipe:
 
 class Queue:
     """
-    handle threading and async queueing
+    handle threading and async queueing within a process
     """
     def __init__(self):
         self.mutex = ThreadLock()
@@ -753,10 +755,10 @@ class Scheduler:
         self.every = {}                         # call_every(int, func)  -- calls func every int seconds
         self.waiting = {}                       # await sched.wait_notify(c_id)
         self.sequence = 0
-        self._read_waiting = {}                 # await sched.readable(file_no) | wait_read(file_no, func)
-        self._write_waiting = {}                # await sched.writable(file_no) | wait_write(file_no, func)
-        self._threads = []                      # sched.new_thread(...)
-        self._cleanup = []                      # sched.call_cleanup(func)
+        self.read_waiting = {}                  # await sched.readable(file_no) | wait_read(file_no, func)
+        self.write_waiting = {}                 # await sched.writable(file_no) | wait_write(file_no, func)
+        self.threads = []                       # sched.new_thread(...)
+        self.cleanup = []                       # sched.call_cleanup(func)
         self.current = None
         self.state = 'stopped'
 
@@ -764,7 +766,7 @@ class Scheduler:
         if func is None:
             raise Exception('func cannot be None')
         todo = Todo(func, *args, **kwds)
-        self._cleanup.append(todo)
+        self.cleanup.append(todo)
 
     def call_every(self, every, func, *args, **kwds):
         if func is None:
@@ -809,7 +811,7 @@ class Scheduler:
 
     def new_thread(self, func, *args, label=None, daemon=False, **kwds):
         t = Thread(target=func, name=label, daemon=daemon, args=args, kwargs=kwds)
-        self._threads.append(t)
+        self.threads.append(t)
         if self.state == 'running':
             t.start()
 
@@ -821,17 +823,17 @@ class Scheduler:
 
     async def readable(self, fileno):
         logger.debug('awaiting readable on %r', fileno)
-        self._read_waiting[fileno] = sched.current
+        self.read_waiting[fileno] = sched.current
         sched.current = None
         await switch()
 
     def run(self):
         self.state = 'running'
-        for t in self._threads[:]:
+        for t in self.threads[:]:
             t.start()
         while (
                 self.state == 'running' and
-                (self.ready or self.sleeping or self._read_waiting or self._write_waiting or self.once)
+                (self.ready or self.sleeping or self.read_waiting or self.write_waiting or self.once)
             ):
             if not self.ready:
                 if self.sleeping:
@@ -845,11 +847,11 @@ class Scheduler:
                 else:
                     timeout = None
                 # wait for I/O (and sleep)
-                can_read, can_write, _ = select.select(self._read_waiting, self._write_waiting, [], timeout)
+                can_read, can_write, _ = select.select(self.read_waiting, self.write_waiting, [], timeout)
                 for fd in can_read:
-                    self.ready.append(self._read_waiting.pop(fd))
+                    self.ready.append(self.read_waiting.pop(fd))
                 for fd in can_write:
-                    self.ready.append(self._write_waiting.pop(fd))
+                    self.ready.append(self.write_waiting.pop(fd))
                 # check for sleeping tasks
                 now = time.time()
                 while self.sleeping:
@@ -877,7 +879,7 @@ class Scheduler:
                 if func in self.every:
                     self.call_later(self.every[func], func)
         self.state = 'stopped'
-        for c in self._cleanup:
+        for c in self.cleanup:
             c()
 
     async def sleep(self, delay):
@@ -895,15 +897,15 @@ class Scheduler:
 
     def wait_read(self, fileno, func):
         logger.debug('waiting for read on %r for %r', fileno, func)
-        self._read_waiting[fileno] = func
+        self.read_waiting[fileno] = func
     
     def wait_write(self, fileno, func):
         logger.debug('waiting for write on %r for %r', fileno, func)
-        self._write_waiting[file_no] = func
+        self.write_waiting[file_no] = func
 
     async def writeable(self, fileno):
         logger.debug('awaiting writeable on %r', fileno)
-        self._write_waiting[file_no] = sched.current
+        self.write_waiting[file_no] = sched.current
         sched.current = None
         await switch()
 
@@ -930,13 +932,15 @@ class Signal:
         return cls.registry[name]
 
     def __repr__(self):
-        return "Signal(%r)" % self.name
+        if self.name is None:
+            return "Signal()"
+        else:
+            return "Signal(%r)" % self.name
 
     def connect(self, subscriber):
         self.receivers.append(subscriber)
 
     def notify(self, event=None, sender=None):
-        results = []
         for receiver in self.receivers:
             if event is not None:
                 res = receiver(event)
@@ -2364,7 +2368,12 @@ class Entry(Frame):
         self.label = self.add_widget(Label(label))
         e_width = (self.inner_size.width or 32) - len(label) - 1
         self.entry = self.add_widget(TextBox(size=(1, e_width), sticky=EW))
+        self.signal = Signal(self.__class__.__name__)
 
+    def process_key(self, event):
+        if event.key in (KEY_RETURN, KEY_TAB):
+            sched.call_soon(self.signal.notify, self.css_id, self.entry.value)
+        return False
 
 class TextBox(Frame):
     """
@@ -3453,7 +3462,6 @@ if __name__ == '__main__':
         border_style = SINGLE
         choices = ('Attribute', 'Color', 'Misc', 'ButtonPress', 'KeyPress', 'ACS')
         orient= HORIZONTAL
-        signals = True
         size = 2, 50
         sticky = EW
 
